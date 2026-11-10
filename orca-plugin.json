@@ -2,8 +2,8 @@
   "manifestVersion": 2,
   "id": "wallpaper-studio",
   "name": "Wallpaper Studio",
-  "version": "0.3.0",
-  "description": "Pick any image, crop and adjust it, and set it as the wallpaper of the ASCII · My Wallpaper themes.",
+  "version": "0.3.1",
+  "description": "Use your own picture as an Orca wallpaper: crop and adjust it, and Studio keeps a My Wallpaper theme up to date with it.",
   "author": {
     "name": "dohaidang",
     "url": "https://github.com/dohaidang"

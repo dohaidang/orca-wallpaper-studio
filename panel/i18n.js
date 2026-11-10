@@ -58,6 +58,7 @@ const MESSAGES = {
     waiting_worker: 'Đang chờ worker… ({e})',
     unknown_error: 'lỗi không rõ',
     adjusted: 'Đã tự điều chỉnh: {list}',
+    reload_failed: 'Orca chưa nạp được thư mục theme. Hãy thêm nó trong Cài đặt → Plugins → Development folders: {folder}',
     applied: 'Đã áp dụng vào {name}: {summary}.{note}\nChọn (hoặc chọn lại) theme "{name}" trong Cài đặt → Giao diện để thấy ảnh mới.\nThư mục theme: {folder}'
   },
   en: {
@@ -114,6 +115,7 @@ const MESSAGES = {
     waiting_worker: 'Waiting for the worker… ({e})',
     unknown_error: 'unknown error',
     adjusted: 'Adjusted automatically: {list}',
+    reload_failed: 'Orca could not load the theme folder yet. Add it under Settings → Plugins → Development folders: {folder}',
     applied: 'Applied to {name}: {summary}.{note}\nSelect (or reselect) the "{name}" theme under Settings → Appearance to see the new image.\nTheme folder: {folder}'
   }
 }

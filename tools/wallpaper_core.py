@@ -106,17 +106,40 @@ def themes_dir():
         raise WallpaperError(msg('themes_dir_failed', folder=folder, error=error)) from error
 
 
+def find_orca_cli():
+    """Orca's command-line tool, or None. It lives in a `bin` folder next to Orca's program files. A bare `orca`
+    is not safe: in some environments (an Orca worker among them) it resolves to the application itself, which
+    just says another Orca is already running."""
+    names = ('orca.exe', 'orca.cmd') if os.name == 'nt' else ('orca',)
+    local = os.environ.get('LOCALAPPDATA') or os.path.join(os.path.expanduser('~'), 'AppData', 'Local')
+    folders = os.environ.get('PATH', '').split(os.pathsep) + [os.path.join(local, 'Programs', 'orca', 'resources', 'bin')]
+    for folder in folders:
+        for name in names:
+            path = os.path.join(folder, name)
+            if folder and os.path.isfile(path) and os.path.basename(os.path.normpath(folder)).lower() == 'bin':
+                return path
+    return None
+
+
 def reload_in_orca(folder):
     """Show the new wallpaper at once: reload the folder in Orca, loading it first if Orca has not seen it yet.
-    Returns the first line Orca printed (for the user), or an empty string when Orca's CLI is not available."""
+    Returns an empty string when Orca has the folder loaded, otherwise what went wrong."""
+    cli = find_orca_cli()
+    if not cli:
+        return msg('no_orca_cli')
+
     def run(verb):
-        done = subprocess.run(f'orca plugin dev {verb} "{folder}"', shell=True, capture_output=True, text=True)
-        return done.returncode, (done.stdout or '') + (done.stderr or '')
+        try:
+            done = subprocess.run([cli, 'plugin', 'dev', verb, folder], capture_output=True, text=True, timeout=60)
+        except (OSError, subprocess.SubprocessError) as error:
+            return 1, str(error)
+        return done.returncode, ((done.stdout or '') + (done.stderr or '')).strip()
     code, text = run('reload')
     if code != 0 and 'not a loaded' in text.lower():
         code, text = run('load')
-    lines = text.strip().splitlines()
-    return lines[0] if lines else ''
+    if code == 0:
+        return ''
+    return text.splitlines()[0] if text else msg('reload_failed')
 
 
 # Saved copies of the user's pictures live outside the plugin, so updating or reinstalling it keeps them.
@@ -171,6 +194,8 @@ _MESSAGES = {
     'kind_still': ('tĩnh', 'still'),
     'bad_params': ('Thông số không hợp lệ.', 'Invalid settings.'),
     'bad_slot': ('Ô hình nền không hợp lệ.', 'Invalid wallpaper slot.'),
+    'no_orca_cli': ('Không tìm thấy công cụ dòng lệnh của Orca.', "Orca's command-line tool was not found."),
+    'reload_failed': ('Orca không nạp được thư mục theme.', 'Orca could not load the theme folder.'),
     'themes_dir_failed': ('Không tạo được thư mục theme My Wallpaper tại {folder}: {error}', 'Could not create the My Wallpaper theme folder at {folder}: {error}'),
     'no_python': ('Không tìm thấy Python có Pillow. Hãy cài Python 3 rồi chạy "pip install Pillow", hoặc nhập đường dẫn python.exe trong cài đặt plugin.', 'No Python with Pillow was found. Install Python 3 and run "pip install Pillow", or enter the path of python.exe in the plugin settings.'),
     'usage': ('Cách dùng: wallpaper_cli.py apply <ảnh> <ô> <edit.json> | env', 'Usage: wallpaper_cli.py apply <image> <slot> <edit.json> | env'),

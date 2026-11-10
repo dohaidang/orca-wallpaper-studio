@@ -358,7 +358,8 @@ function showResult(job, slot, answer) {
   if (!answer.ok) return finish(false, tr('failed', { e: answer.error || tr('unknown_error') }))
   const name = 'My Wallpaper' + (slot === 1 ? '' : ` ${slot}`)
   const note = answer.reduced?.length ? '\n' + tr('adjusted', { list: answer.reduced.join('; ') }) : ''
-  finish(true, tr('applied', { name, summary: answer.summary, note, folder: answer.folder || '' }))
+  const unloaded = answer.reloaded === false ? '\n' + tr('reload_failed', { folder: answer.folder || '' }) : ''
+  finish(true, tr('applied', { name, summary: answer.summary, note, folder: answer.folder || '' }) + unloaded)
 }
 
 function finish(ok, text) {
