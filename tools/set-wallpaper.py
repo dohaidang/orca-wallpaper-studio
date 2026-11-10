@@ -12,8 +12,9 @@ import sys
 
 from PIL import Image, ImageSequence
 
-# The folder of your copy of the ASCII Themes `animated` branch: pass it as the second argument or set ASCII_THEMES_DIR.
-DEFAULT_PLUGIN = os.environ.get('ASCII_THEMES_DIR', '')
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # isolated mode does not add it
+import wallpaper_core as core  # noqa: E402
+
 # Limits of the locally patched Orca build: animated WebP allowed, at most 16 MB.
 # A stock Orca accepts only static images of at most 2 MB.
 MAX_BYTES = 16 * 1024 * 1024
@@ -61,9 +62,9 @@ def save_static(src, out):
 def main():
     if len(sys.argv) < 2:
         raise SystemExit('Drag an image file onto Doi-hinh-nen.bat, or run: python -I set-wallpaper.py <image>')
-    source, plugin = sys.argv[1], sys.argv[2] if len(sys.argv) > 2 else DEFAULT_PLUGIN
-    if not os.path.isfile(os.path.join(plugin, 'orca-plugin.json')):
-        raise SystemExit(f'Plugin folder not found: {plugin}')
+    source = sys.argv[1]
+    # The My Wallpaper theme folder: the second argument, else WALLPAPER_THEMES_DIR, else the default folder in your home.
+    plugin = core.ensure_theme_plugin(sys.argv[2]) if len(sys.argv) > 2 else core.themes_dir()
     out = os.path.join(plugin, 'images', 'custom.webp')
     tmp = out + '.tmp.webp'
     with Image.open(source) as src:
@@ -73,9 +74,8 @@ def main():
     kind = f'animated, {frames} frames' if animated else 'static'
     print(f'Wallpaper set: {os.path.basename(source)} -> images/custom.webp '
           f'({size[0]}x{size[1]}, {kind}, quality {quality}, {os.path.getsize(out) / 1048576:.2f} MB)')
-    result = subprocess.run('orca plugin dev reload "' + plugin + '"', shell=True, capture_output=True, text=True)
-    print(result.stdout.strip().splitlines()[0] if result.stdout.strip() else result.stderr.strip())
-    print('In Orca, pick "ASCII - My Wallpaper" (or re-pick it) under Settings > Appearance > Dark theme.')
+    print(core.reload_in_orca(plugin))
+    print('In Orca, pick "My Wallpaper" (or re-pick it) under Settings > Appearance > Dark theme.')
 
 
 if __name__ == '__main__':

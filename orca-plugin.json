@@ -2,7 +2,7 @@
   "manifestVersion": 2,
   "id": "wallpaper-studio",
   "name": "Wallpaper Studio",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Pick any image, crop and adjust it, and set it as the wallpaper of the ASCII · My Wallpaper themes.",
   "author": {
     "name": "dohaidang",
@@ -28,10 +28,10 @@
     "settings": [
       {
         "key": "themesDir",
-        "title": "ASCII Themes folder",
+        "title": "My Wallpaper themes folder (optional)",
         "type": "string",
         "default": "",
-        "placeholder": "Folder of your copy of the ASCII Themes animated branch"
+        "placeholder": "Leave empty to use Orca My Wallpaper in your home folder"
       },
       {
         "key": "python",

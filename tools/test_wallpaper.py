@@ -6,6 +6,7 @@ Works on a temporary copy of the plugin's theme files, so the real plugin is nev
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -129,6 +130,62 @@ class CoreTests(unittest.TestCase):
     def test_clamp_output(self):
         self.assertEqual(core.clamp_output(8000, 4500), (4096, 2304))
         self.assertEqual(core.clamp_output(320, 180), (640, 360))
+
+    def test_creates_its_own_theme_plugin(self):
+        folder = os.path.join(self.tmp, 'my-themes')
+        self.assertEqual(core.ensure_theme_plugin(folder), folder)
+        with open(os.path.join(folder, 'orca-plugin.json'), encoding='utf8') as f:
+            manifest = json.load(f)
+        themes = manifest['contributes']['themes']
+        self.assertEqual(len(themes), 9)  # three slots, each with the theme and its two sidebar variants
+        self.assertEqual(len({t['id'] for t in themes}), 9)
+        self.assertEqual(themes[0]['title'], 'My Wallpaper')
+        for theme in themes:
+            path = os.path.join(folder, theme['path'])
+            self.assertTrue(os.path.isfile(path), theme['path'])
+            with open(path, encoding='utf8') as f:
+                background = json.load(f)['background']['path']
+            self.assertTrue(os.path.isfile(os.path.join(folder, background)), background)
+        for stem in ('custom', 'custom-2', 'custom-3'):
+            with Image.open(os.path.join(folder, 'images', f'{stem}.webp')) as placeholder:
+                self.assertGreaterEqual(placeholder.size, (640, 360))
+
+    def test_existing_theme_files_are_never_overwritten(self):
+        folder = os.path.join(self.tmp, 'my-themes')
+        core.ensure_theme_plugin(folder)
+        marker = os.path.join(folder, 'themes', 'custom.json')
+        with open(marker, 'w', encoding='utf8') as f:
+            f.write('{"edited": true}')
+        core.ensure_theme_plugin(folder)
+        with open(marker, encoding='utf8') as f:
+            self.assertEqual(json.load(f), {'edited': True})
+
+    def test_applies_into_a_fresh_theme_folder_without_any_other_plugin(self):
+        folder = os.path.join(self.tmp, 'fresh')
+        old = os.environ.get('WALLPAPER_THEMES_DIR')
+        os.environ['WALLPAPER_THEMES_DIR'] = folder
+        try:
+            self.assertEqual(core.themes_dir(), folder)
+            info = core.inspect_source(self.small)
+            edit = core.Edit(crop=core.centered_crop(info.width, info.height, 16 / 9), mode='stock')
+            edit.out_w, edit.out_h = core.clamp_output(edit.out_w, round(edit.out_w * 9 / 16))
+            summary, _, _ = core.apply_to_slot(1, info, edit, reload=False)
+        finally:
+            if old is None:
+                os.environ.pop('WALLPAPER_THEMES_DIR', None)
+            else:
+                os.environ['WALLPAPER_THEMES_DIR'] = old
+        self.assertIn('MB', summary)
+        with Image.open(os.path.join(folder, 'images', 'custom.webp')) as written:
+            self.assertGreaterEqual(written.size, (640, 360))
+
+    def test_generated_plugin_passes_orcas_validator(self):
+        if not shutil.which('orca'):
+            self.skipTest('the orca command is not installed')
+        folder = os.path.join(self.tmp, 'validated')
+        core.ensure_theme_plugin(folder)
+        done = subprocess.run(f'orca plugin validate "{folder}"', shell=True, capture_output=True, text=True)
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
 
 
 class StudioSmokeTest(unittest.TestCase):

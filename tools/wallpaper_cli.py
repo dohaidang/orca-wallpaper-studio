@@ -37,9 +37,10 @@ def apply(source, slot, edit_path):
         right, bottom = max(left + 1, min(right, ow)), max(top + 1, min(bottom, oh))
         edit.crop = [left, top, right, bottom]
     edit.out_w, edit.out_h = core.clamp_output(max(1, int(edit.out_w)), max(1, int(edit.out_h)))
+    folder = core.themes_dir()
     summary, reduced, reload = core.apply_to_slot(
-        slot, info, edit, progress=lambda text: print('PROGRESS ' + text, file=sys.stderr, flush=True))
-    emit({'ok': True, 'summary': summary, 'reduced': reduced, 'reload': reload})
+        slot, info, edit, plugin_dir=folder, progress=lambda text: print('PROGRESS ' + text, file=sys.stderr, flush=True))
+    emit({'ok': True, 'summary': summary, 'reduced': reduced, 'reload': reload, 'folder': folder})
 
 
 def main():

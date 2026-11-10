@@ -19,14 +19,104 @@ def _appdata():
     return os.environ.get('APPDATA') or os.path.join(os.environ.get('USERPROFILE', os.path.expanduser('~')), 'AppData', 'Roaming')
 
 
-def themes_dir():
-    """Folder of the ASCII Themes plugin that holds the My Wallpaper themes (a local copy of its `animated`
-    branch). The Orca plugin passes its "ASCII Themes folder" setting as ASCII_THEMES_DIR; the desktop tool
-    reads the same environment variable."""
-    folder = os.environ.get('ASCII_THEMES_DIR', '').strip()
-    if not folder or not os.path.isfile(os.path.join(folder, 'orca-plugin.json')):
-        raise WallpaperError(msg('no_themes_dir'))
+# ---------- the My Wallpaper theme plugin ----------
+# Wallpaper Studio keeps the three My Wallpaper themes in a small plugin of its own, so it does not depend on
+# any other theme plugin. Orca only reads a theme's background from inside the plugin folder, and a plugin
+# installed from a catalog or Git URL is read-only, so this folder is loaded into Orca as a development folder
+# (`orca plugin dev load`), which Orca reloads when its files change.
+THEMES_FOLDER_NAME = 'Orca My Wallpaper'
+THEMES_PLUGIN_ID = 'my-wallpaper'
+_BASE_TOKENS = {
+    '--background': '#111214', '--foreground': '#ececef', '--card': '#18191c', '--popover': '#1b1c20',
+    '--sidebar': '#151619', '--primary': '#8ab4ff', '--primary-foreground': '#0d1a33', '--accent': '#26282d',
+    '--accent-foreground': '#f2f2f5', '--muted-foreground': '#a6a8b0', '--border': '#34363c', '--ring': '#8ab4ff'}
+_SIDEBAR_TOKENS = {
+    '-sidebar-dark': {
+        '--sidebar': '#171717', '--sidebar-foreground': '#f0f0f0', '--sidebar-primary': '#1447e6',
+        '--sidebar-primary-foreground': '#f0f0f0', '--sidebar-accent': '#262626',
+        '--sidebar-accent-foreground': '#f0f0f0', '--sidebar-border': '#ffffff12', '--sidebar-ring': '#525252'},
+    '-sidebar-light': {
+        '--sidebar': '#fafafa', '--sidebar-foreground': '#0a0a0a', '--sidebar-primary': '#171717',
+        '--sidebar-primary-foreground': '#fafafa', '--sidebar-accent': '#f5f5f5',
+        '--sidebar-accent-foreground': '#171717', '--sidebar-border': '#e5e5e5', '--sidebar-ring': '#a1a1a1'}}
+_TERMINAL = {
+    'background': '#111214', 'foreground': '#ececef', 'cursor': '#8ab4ff', 'black': '#26282d', 'red': '#f28b82',
+    'green': '#a8dab5', 'yellow': '#fdd663', 'blue': '#8ab4ff', 'magenta': '#d7aefb', 'cyan': '#78d9ec',
+    'white': '#ececef'}
+_SUFFIX_LABEL = {'': '', '-sidebar-dark': ' (dark sidebar)', '-sidebar-light': ' (light sidebar)'}
+
+
+def default_themes_dir():
+    """Where Wallpaper Studio keeps its My Wallpaper theme plugin when the user has not chosen a folder."""
+    return os.path.join(os.path.expanduser('~'), THEMES_FOLDER_NAME)
+
+
+def _slot_title(slot):
+    return 'My Wallpaper' + ('' if slot == 1 else f' {slot}')
+
+
+def _write_json(path, data):
+    with io.open(path, 'w', encoding='utf8') as f:
+        f.write(json.dumps(data, indent=2, ensure_ascii=False) + '\n')
+
+
+def ensure_theme_plugin(folder):
+    """Create the My Wallpaper theme plugin in `folder` if it is missing. Files that already exist are never
+    overwritten, so a folder the user has customised (or another theme plugin that holds the same slot files)
+    is left alone and only gains what it lacks."""
+    for sub in ('themes', 'images', 'terminal'):
+        os.makedirs(os.path.join(folder, sub), exist_ok=True)
+    manifest = os.path.join(folder, 'orca-plugin.json')
+    if not os.path.isfile(manifest):
+        themes, terminal = [], [{'id': f'{THEMES_PLUGIN_ID}-term', 'title': 'My Wallpaper', 'path': 'terminal/custom.json'}]
+        for slot, (prefix, stem) in SLOTS.items():
+            file_stem = 'custom' if slot == 1 else f'custom-{slot}'
+            for suffix in VARIANT_SUFFIXES:
+                themes.append({'id': prefix + suffix, 'title': _slot_title(slot) + _SUFFIX_LABEL[suffix],
+                               'path': f'themes/{file_stem}{suffix}.json'})
+        _write_json(manifest, {
+            'manifestVersion': 2, 'execution': 'data', 'id': THEMES_PLUGIN_ID, 'name': 'My Wallpaper',
+            'version': '1.0.0', 'description': 'Your own pictures as Orca wallpapers, made with Wallpaper Studio.',
+            'license': 'MIT', 'engines': {'orca': '>=1.4.246'},
+            'contributes': {'themes': themes, 'terminalThemes': terminal}})
+    terminal = os.path.join(folder, 'terminal', 'custom.json')
+    if not os.path.isfile(terminal):
+        _write_json(terminal, {'schemaVersion': 1, 'mode': 'dark', 'terminal': _TERMINAL})
+    for slot, (prefix, stem) in SLOTS.items():
+        file_stem = 'custom' if slot == 1 else f'custom-{slot}'
+        for suffix in VARIANT_SUFFIXES:
+            path = os.path.join(folder, 'themes', f'{file_stem}{suffix}.json')
+            if not os.path.isfile(path):
+                _write_json(path, {'schemaVersion': 1, 'base': 'dark', 'tokens': {**_BASE_TOKENS, **_SIDEBAR_TOKENS.get(suffix, {})},
+                                   'background': {'path': f'images/{stem}.webp', 'opacity': 1, 'size': 'cover', 'position': 'center'}})
+        image = os.path.join(folder, 'images', f'{stem}.webp')
+        if not os.path.isfile(image):  # a plain dark picture, so the theme is valid before the first Apply
+            Image.new('RGB', (1280, 720), (17, 18, 20)).save(image, 'WEBP', quality=80)
     return folder
+
+
+def themes_dir():
+    """The My Wallpaper theme plugin folder, created on first use. The Orca plugin passes its "My Wallpaper themes
+    folder" setting as WALLPAPER_THEMES_DIR (empty: the default folder in the user's home); the desktop tool
+    reads the same variable. ASCII_THEMES_DIR is still read for people who point it at another theme plugin."""
+    folder = (os.environ.get('WALLPAPER_THEMES_DIR') or os.environ.get('ASCII_THEMES_DIR') or '').strip() or default_themes_dir()
+    try:
+        return ensure_theme_plugin(folder)
+    except OSError as error:
+        raise WallpaperError(msg('themes_dir_failed', folder=folder, error=error)) from error
+
+
+def reload_in_orca(folder):
+    """Show the new wallpaper at once: reload the folder in Orca, loading it first if Orca has not seen it yet.
+    Returns the first line Orca printed (for the user), or an empty string when Orca's CLI is not available."""
+    def run(verb):
+        done = subprocess.run(f'orca plugin dev {verb} "{folder}"', shell=True, capture_output=True, text=True)
+        return done.returncode, (done.stdout or '') + (done.stderr or '')
+    code, text = run('reload')
+    if code != 0 and 'not a loaded' in text.lower():
+        code, text = run('load')
+    lines = text.strip().splitlines()
+    return lines[0] if lines else ''
 
 
 # Saved copies of the user's pictures live outside the plugin, so updating or reinstalling it keeps them.
@@ -81,7 +171,7 @@ _MESSAGES = {
     'kind_still': ('tĩnh', 'still'),
     'bad_params': ('Thông số không hợp lệ.', 'Invalid settings.'),
     'bad_slot': ('Ô hình nền không hợp lệ.', 'Invalid wallpaper slot.'),
-    'no_themes_dir': ('Chưa chọn thư mục plugin ASCII Themes. Hãy đặt ô "ASCII Themes folder" trong cài đặt plugin (một bản sao nhánh animated có sẵn các theme My Wallpaper).', 'The ASCII Themes folder is not set. Set "ASCII Themes folder" in the plugin settings (a local copy of the animated branch, which has the My Wallpaper themes).'),
+    'themes_dir_failed': ('Không tạo được thư mục theme My Wallpaper tại {folder}: {error}', 'Could not create the My Wallpaper theme folder at {folder}: {error}'),
     'no_python': ('Không tìm thấy Python có Pillow. Hãy cài Python 3 rồi chạy "pip install Pillow", hoặc nhập đường dẫn python.exe trong cài đặt plugin.', 'No Python with Pillow was found. Install Python 3 and run "pip install Pillow", or enter the path of python.exe in the plugin settings.'),
     'usage': ('Cách dùng: wallpaper_cli.py apply <ảnh> <ô> <edit.json> | env', 'Usage: wallpaper_cli.py apply <image> <slot> <edit.json> | env'),
 }
@@ -348,8 +438,7 @@ def apply_to_slot(slot, info, edit, progress=lambda text: None, plugin_dir=None,
     message = ''
     if reload:
         progress(msg('reloading'))
-        result = subprocess.run(f'orca plugin dev reload "{plugin_dir}"', shell=True, capture_output=True, text=True)
-        message = (result.stdout or result.stderr).strip().splitlines()[0] if (result.stdout or result.stderr).strip() else ''
+        message = reload_in_orca(plugin_dir)
     with Image.open(out) as im:
         kind = msg('kind_animated', n=getattr(im, 'n_frames', 1)) if getattr(im, 'is_animated', False) else msg('kind_still')
         summary = f'{im.size[0]}×{im.size[1]}, {kind}, {os.path.getsize(out) / 1048576:.2f} MB'

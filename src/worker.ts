@@ -109,8 +109,8 @@ async function tools(orca: OrcaWorkerApi): Promise<Tools> {
   return {
     python: findPython(text(settings.python)),
     cli: join(TOOLS_DIR, 'wallpaper_cli.py'),
-    // The Python side finds the ASCII Themes plugin folder through this variable.
-    env: { ASCII_THEMES_DIR: text(settings.themesDir) }
+    // The Python side keeps the My Wallpaper themes in this folder (empty: a default folder in the user's home).
+    env: { WALLPAPER_THEMES_DIR: text(settings.themesDir) }
   }
 }
 
