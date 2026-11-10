@@ -12,8 +12,8 @@ import sys
 
 from PIL import Image, ImageSequence
 
-DEFAULT_PLUGIN = os.path.join(os.environ.get('APPDATA', ''), 'orca', 'chat-scratch',
-                              'aec1d16be58e1db7b590602ab9379d70', 'orca-ascii-themes-animated')
+# The folder of your copy of the ASCII Themes `animated` branch: pass it as the second argument or set ASCII_THEMES_DIR.
+DEFAULT_PLUGIN = os.environ.get('ASCII_THEMES_DIR', '')
 # Limits of the locally patched Orca build: animated WebP allowed, at most 16 MB.
 # A stock Orca accepts only static images of at most 2 MB.
 MAX_BYTES = 16 * 1024 * 1024

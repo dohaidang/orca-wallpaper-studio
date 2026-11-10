@@ -19,9 +19,18 @@ def _appdata():
     return os.environ.get('APPDATA') or os.path.join(os.environ.get('USERPROFILE', os.path.expanduser('~')), 'AppData', 'Roaming')
 
 
-PLUGIN_DIR = os.path.join(_appdata(), 'orca', 'chat-scratch',
-                          'aec1d16be58e1db7b590602ab9379d70', 'orca-ascii-themes-animated')
-LIBRARY_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'library')
+def themes_dir():
+    """Folder of the ASCII Themes plugin that holds the My Wallpaper themes (a local copy of its `animated`
+    branch). The Orca plugin passes its "ASCII Themes folder" setting as ASCII_THEMES_DIR; the desktop tool
+    reads the same environment variable."""
+    folder = os.environ.get('ASCII_THEMES_DIR', '').strip()
+    if not folder or not os.path.isfile(os.path.join(folder, 'orca-plugin.json')):
+        raise WallpaperError(msg('no_themes_dir'))
+    return folder
+
+
+# Saved copies of the user's pictures live outside the plugin, so updating or reinstalling it keeps them.
+LIBRARY_DIR = os.environ.get('WALLPAPER_STUDIO_LIBRARY') or os.path.join(_appdata(), 'orca-wallpaper-studio', 'library')
 
 # slot number -> (theme id prefix, image stem); each slot has three theme files (sidebar variants)
 SLOTS = {1: ('my-wallpaper', 'custom'), 2: ('my-wallpaper-2', 'custom-2'), 3: ('my-wallpaper-3', 'custom-3')}
@@ -72,6 +81,8 @@ _MESSAGES = {
     'kind_still': ('tĩnh', 'still'),
     'bad_params': ('Thông số không hợp lệ.', 'Invalid settings.'),
     'bad_slot': ('Ô hình nền không hợp lệ.', 'Invalid wallpaper slot.'),
+    'no_themes_dir': ('Chưa chọn thư mục plugin ASCII Themes. Hãy đặt ô "ASCII Themes folder" trong cài đặt plugin (một bản sao nhánh animated có sẵn các theme My Wallpaper).', 'The ASCII Themes folder is not set. Set "ASCII Themes folder" in the plugin settings (a local copy of the animated branch, which has the My Wallpaper themes).'),
+    'no_python': ('Không tìm thấy Python có Pillow. Hãy cài Python 3 rồi chạy "pip install Pillow", hoặc nhập đường dẫn python.exe trong cài đặt plugin.', 'No Python with Pillow was found. Install Python 3 and run "pip install Pillow", or enter the path of python.exe in the plugin settings.'),
     'usage': ('Cách dùng: wallpaper_cli.py apply <ảnh> <ô> <edit.json> | env', 'Usage: wallpaper_cli.py apply <image> <slot> <edit.json> | env'),
 }
 
@@ -273,7 +284,8 @@ def check_output(path, mode_name):
     return None
 
 
-def write_slot_themes(slot, edit, plugin_dir=PLUGIN_DIR):
+def write_slot_themes(slot, edit, plugin_dir=None):
+    plugin_dir = plugin_dir or themes_dir()
     prefix, stem = SLOTS[slot]
     file_stem = 'custom' if slot == 1 else f'custom-{slot}'
     for suffix in VARIANT_SUFFIXES:
@@ -316,8 +328,9 @@ def load_library(slot):
     return source, Edit(**{k: v for k, v in data['edit'].items() if k in known})
 
 
-def apply_to_slot(slot, info, edit, progress=lambda text: None, plugin_dir=PLUGIN_DIR, reload=True):
+def apply_to_slot(slot, info, edit, progress=lambda text: None, plugin_dir=None, reload=True):
     """Encode, verify, install into the slot, update its theme files, keep a library copy, reload Orca."""
+    plugin_dir = plugin_dir or themes_dir()
     _, stem = SLOTS[slot]
     out = os.path.join(plugin_dir, 'images', f'{stem}.webp')
     tmp = out + '.tmp.webp'

@@ -3,16 +3,19 @@
 // wallpaper_cli.py (the tested Python image pipeline), which writes the slot's wallpaper and theme files
 // into the ASCII themes plugin. Progress and the result are posted back to the panel.
 import type { OrcaWorkerApi } from 'orca/worker'
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
+import { readdirSync } from 'node:fs'
 import { appendFile, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 const MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 const MAX_CHUNK_BYTES = 45 * 1024 // base64 of this stays under the 64 KiB request limit
 const UPLOAD_IDLE_MS = 5 * 60 * 1000
-const DEFAULT_TOOLS_DIR = 'C:\\Users\\dohaidang\\orca-wallpaper'
+// The Python image tools ship inside this plugin, next to src/.
+const TOOLS_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'tools')
 
 // Worker messages follow Orca's UI language. The panel sends it with its requests ("vi-VN" gives Vietnamese;
 // every other language gets English) and the worker remembers the latest one for errors raised later.
@@ -22,6 +25,10 @@ function setLanguage(code: unknown): void {
 }
 const TEXT: Record<string, [string, string]> = {
   python_missing: ['Không chạy được Python ({python}): {error}', 'Could not run Python ({python}): {error}'],
+  no_python: [
+    'Không tìm thấy Python có Pillow. Hãy cài Python 3 rồi chạy "pip install Pillow", hoặc nhập đường dẫn python.exe trong cài đặt plugin.',
+    'No Python with Pillow was found. Install Python 3 and run "pip install Pillow", or enter the path of python.exe in the plugin settings.'
+  ],
   tool_stopped: ['Công cụ xử lý ảnh dừng (mã {code}). {tail}', 'The image tool stopped (code {code}). {tail}'],
   cancelled: ['Đã hủy.', 'Cancelled.'],
   too_big: ['Ảnh phải nhỏ hơn {mb} MB.', 'The image must be smaller than {mb} MB.'],
@@ -56,35 +63,73 @@ function fail(code: string, message: string): Error {
   return Object.assign(new Error(message), { code })
 }
 
-async function tools(orca: OrcaWorkerApi): Promise<{ python: string; cli: string }> {
+/** Commands that might start a Python with Pillow, in the order to try: the plugin setting, then the usual launchers
+ *  and the per-user install folders. A command is a program plus any leading arguments (`py -3`). */
+function pythonCandidates(configured: string): string[][] {
+  const list: string[][] = []
+  if (configured) list.push([configured])
+  list.push(['py', '-3'], ['python3'], ['python'])
+  const local = process.env.LOCALAPPDATA ?? (process.env.USERPROFILE ? join(process.env.USERPROFILE, 'AppData', 'Local') : '')
+  if (local) {
+    for (const base of [join(local, 'Python'), join(local, 'Programs', 'Python')]) {
+      try {
+        for (const name of readdirSync(base).sort().reverse()) list.push([join(base, name, 'python.exe')])
+      } catch {
+        // that install folder does not exist
+      }
+    }
+  }
+  return list
+}
+
+const pythonFound = new Map<string, string[]>()
+/** The first candidate that can import Pillow, remembered per setting value; null when none can. */
+function findPython(configured: string): string[] | null {
+  const known = pythonFound.get(configured)
+  if (known) return known
+  for (const command of pythonCandidates(configured)) {
+    const probe = spawnSync(command[0], [...command.slice(1), '-I', '-c', 'import PIL'], { windowsHide: true, timeout: 10_000 })
+    if (probe.status === 0) {
+      pythonFound.set(configured, command)
+      return command
+    }
+  }
+  return null
+}
+
+type Tools = { python: string[] | null; cli: string; env: Record<string, string> }
+async function tools(orca: OrcaWorkerApi): Promise<Tools> {
   let settings: Record<string, unknown> = {}
   try {
     settings = ((await orca.host.call('settings.get', {})) as { settings?: Record<string, unknown> }).settings ?? {}
   } catch {
-    // fall back to the defaults below
+    // no settings: the defaults below apply
   }
-  const text = (value: unknown, fallback: string) => (typeof value === 'string' && value.trim() ? value.trim() : fallback)
+  const text = (value: unknown) => (typeof value === 'string' ? value.trim() : '')
   return {
-    python: text(settings.python, 'python'),
-    cli: join(text(settings.toolsDir, DEFAULT_TOOLS_DIR), 'wallpaper_cli.py')
+    python: findPython(text(settings.python)),
+    cli: join(TOOLS_DIR, 'wallpaper_cli.py'),
+    // The Python side finds the ASCII Themes plugin folder through this variable.
+    env: { ASCII_THEMES_DIR: text(settings.themesDir) }
   }
 }
 
 /** Runs the CLI: stderr lines starting with PROGRESS go to onProgress, stdout's last line is the JSON answer. */
 function runCli(
-  python: string,
+  python: string[],
   args: string[],
   onProgress: (text: string) => void,
-  onChild: (child: ReturnType<typeof spawn>) => void = () => undefined
+  onChild: (child: ReturnType<typeof spawn>) => void = () => undefined,
+  extraEnv: Record<string, string> = {}
 ): Promise<Record<string, unknown>> {
   return new Promise((resolve) => {
     // Why: Orca gives workers an allowlisted environment without APPDATA, which the Python side needs to
-    // find Orca's profile and the themes plugin; ELECTRON_RUN_AS_NODE must not leak into child processes.
-    const env: Record<string, string | undefined> = { ...process.env }
+    // find Orca's profile; ELECTRON_RUN_AS_NODE must not leak into child processes.
+    const env: Record<string, string | undefined> = { ...process.env, ...extraEnv }
     env.APPDATA ??= env.USERPROFILE ? join(env.USERPROFILE, 'AppData', 'Roaming') : undefined
     env.LOCALAPPDATA ??= env.USERPROFILE ? join(env.USERPROFILE, 'AppData', 'Local') : undefined
     delete env.ELECTRON_RUN_AS_NODE
-    const child = spawn(python, ['-I', ...args], { windowsHide: true, env })
+    const child = spawn(python[0], [...python.slice(1), '-I', ...args], { windowsHide: true, env })
     onChild(child)
     let out = ''
     let err = ''
@@ -99,7 +144,7 @@ function runCli(
         if (line.startsWith('PROGRESS ')) onProgress(line.slice(9))
       }
     })
-    child.on('error', (error) => resolve({ ok: false, error: say('python_missing', { python, error: error.message }) }))
+    child.on('error', (error) => resolve({ ok: false, error: say('python_missing', { python: python.join(' '), error: error.message }) }))
     child.on('close', (code) => {
       const last = out.trim().split(/\r?\n/).pop() ?? ''
       try {
@@ -151,11 +196,15 @@ export default function activate(orca: OrcaWorkerApi): void {
   sweep.unref?.()
 
   orca.panels.handle('wallpaper.env', async () => {
-    const { python, cli } = await tools(orca)
-    const answer = await runCli(python, [cli, 'env'], () => undefined)
+    const { python, cli, env } = await tools(orca)
+    if (!python) {
+      orca.log('wallpaper.env: no Python with Pillow found')
+      return { terminalOpacity: 0.6, error: say('no_python') }
+    }
+    const answer = await runCli(python, [cli, 'env'], () => undefined, undefined, env)
     if (typeof answer.terminalOpacity === 'number') return { terminalOpacity: answer.terminalOpacity }
     // Why surface it: a missing Python or tools folder otherwise only shows up later, on Apply.
-    orca.log(`wallpaper.env failed (${python} ${cli}): ${JSON.stringify(answer)}`)
+    orca.log(`wallpaper.env failed (${python.join(' ')} ${cli}): ${JSON.stringify(answer)}`)
     return { terminalOpacity: 0.6, error: String(answer.error ?? 'unknown error') }
   })
 
@@ -214,7 +263,8 @@ export default function activate(orca: OrcaWorkerApi): void {
       orca.log(`wallpaper.apply slot ${slot}: started (${upload.received} bytes)`)
       void (async () => {
         try {
-          const { python, cli } = await tools(orca)
+          const { python, cli, env } = await tools(orca)
+          if (!python) return finish({ ok: false, error: say('no_python') })
           const editFile = join(upload.dir, 'edit.json')
           // The Python tool writes its own messages (progress, adjustments, errors) in the same language.
           await writeFile(editFile, JSON.stringify({ ...(edit as Record<string, unknown> | null ?? {}), lang: language }), 'utf8')
@@ -232,7 +282,7 @@ export default function activate(orca: OrcaWorkerApi): void {
             }
           }, (child) => {
             entry.child = child
-          })
+          }, env)
           orca.log(`wallpaper.apply slot ${slot}: ${JSON.stringify(answer)}`)
           finish(answer)
         } catch (error) {

@@ -2,8 +2,14 @@
   "manifestVersion": 2,
   "id": "wallpaper-studio",
   "name": "Wallpaper Studio",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Pick any image, crop and adjust it, and set it as the wallpaper of the ASCII · My Wallpaper themes.",
+  "author": {
+    "name": "dohaidang",
+    "url": "https://github.com/dohaidang"
+  },
+  "repository": "https://github.com/dohaidang/orca-wallpaper-studio",
+  "license": "MIT",
   "engines": {
     "orca": ">=1.4.246"
   },
@@ -21,18 +27,18 @@
     ],
     "settings": [
       {
-        "key": "toolsDir",
-        "title": "Wallpaper tools folder",
+        "key": "themesDir",
+        "title": "ASCII Themes folder",
         "type": "string",
-        "default": "C:\\Users\\dohaidang\\orca-wallpaper",
-        "placeholder": "Folder that holds wallpaper_cli.py"
+        "default": "",
+        "placeholder": "Folder of your copy of the ASCII Themes animated branch"
       },
       {
         "key": "python",
-        "title": "Python with Pillow (full path)",
+        "title": "Python with Pillow (optional)",
         "type": "string",
-        "default": "C:\\Users\\dohaidang\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
-        "placeholder": "C:\\Path\\To\\python.exe"
+        "default": "",
+        "placeholder": "Leave empty to find Python automatically"
       }
     ]
   },
