@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Wallpaper Studio</title>
+  <link rel="stylesheet" href="panel.css">
+</head>
+<body>
+  <main>
+    <section class="pick">
+      <label class="button primary" for="file" data-i18n="pick"></label>
+      <input id="file" type="file" accept=".jpg,.jpeg,.png,.webp,.bmp,.gif,image/*" hidden>
+      <p id="source" class="muted"></p>
+    </section>
+
+    <section id="editor-box" hidden>
+      <canvas id="editor" data-i18n-aria="editor_aria"></canvas>
+      <p class="muted small" data-i18n="crop_hint"></p>
+
+      <fieldset>
+        <legend data-i18n="legend_crop"></legend>
+        <select id="aspect" data-i18n-aria="aspect_aria"></select>
+        <div class="row">
+          <button data-action="rotate-left" data-i18n-title="rotate_left">⟲</button>
+          <button data-action="rotate-right" data-i18n-title="rotate_right">⟳</button>
+          <button data-action="flip-h" data-i18n-title="flip_h">⇋</button>
+          <button data-action="flip-v" data-i18n-title="flip_v">⇵</button>
+          <button data-action="reset" data-i18n="reset"></button>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend data-i18n="legend_size"></legend>
+        <select id="width" data-i18n-aria="width_aria"></select>
+        <p id="size-note" class="muted small"></p>
+      </fieldset>
+
+      <fieldset>
+        <legend data-i18n="legend_adjust"></legend>
+        <label><span data-i18n="brightness"></span> <output for="brightness"></output><input id="brightness" type="range" min="0.5" max="1.5" step="0.05" value="1"></label>
+        <label><span data-i18n="darken"></span> <output for="darken"></output><input id="darken" type="range" min="0" max="0.8" step="0.05" value="0"></label>
+        <label><span data-i18n="blur"></span> <output for="blur"></output><input id="blur" type="range" min="0" max="10" step="0.5" value="0"></label>
+      </fieldset>
+
+      <fieldset>
+        <legend data-i18n="legend_display"></legend>
+        <label><span data-i18n="opacity"></span> <output for="opacity"></output><input id="opacity" type="range" min="0.2" max="1" step="0.05" value="1"></label>
+        <div class="row">
+          <label class="inline"><span data-i18n="fit"></span> <select id="size"><option>cover</option><option>contain</option><option>tile</option></select></label>
+          <label class="inline"><span data-i18n="anchor"></span> <select id="position"><option>center</option><option>top</option><option>bottom</option><option>left</option><option>right</option></select></label>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend data-i18n="legend_anim"></legend>
+        <label><span data-i18n="speed"></span> <output for="speed"></output><input id="speed" type="range" min="0.25" max="2" step="0.05" value="1"></label>
+        <div class="row">
+          <label class="inline"><span data-i18n="from_frame"></span> <input id="first" type="number" min="0" value="0"></label>
+          <label class="inline"><span data-i18n="to_frame"></span> <input id="last" type="number" min="-1" value="-1" data-i18n-title="to_frame_title"></label>
+          <label class="inline"><span data-i18n="every"></span> <input id="step" type="number" min="1" max="4" value="1"> <span data-i18n="keep_one"></span></label>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend data-i18n="legend_apply"></legend>
+        <div class="row">
+          <label class="inline"><input type="radio" name="slot" value="1" checked> My Wallpaper</label>
+          <label class="inline"><input type="radio" name="slot" value="2"> 2</label>
+          <label class="inline"><input type="radio" name="slot" value="3"> 3</label>
+        </div>
+        <label class="inline"><input type="radio" name="mode" value="patched" checked> <span data-i18n="mode_patched"></span></label>
+        <label class="inline"><input type="radio" name="mode" value="stock"> <span data-i18n="mode_stock"></span></label>
+      </fieldset>
+
+      <p class="muted small" id="preview-note"></p>
+      <canvas id="preview" width="320" height="180" data-i18n-aria="preview_aria"></canvas>
+
+      <button id="apply" class="button primary wide" data-i18n="apply"></button>
+      <button id="cancel" class="button wide" data-i18n="cancel" hidden></button>
+      <div id="progress" hidden><div id="bar"></div></div>
+      <p id="status" role="status" aria-live="polite"></p>
+    </section>
+  </main>
+  <script src="i18n.js"></script>
+  <script src="panel.js"></script>
+</body>
+</html>

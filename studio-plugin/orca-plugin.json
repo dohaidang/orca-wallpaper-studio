@@ -1,0 +1,44 @@
+{
+  "manifestVersion": 2,
+  "id": "wallpaper-studio",
+  "name": "Wallpaper Studio",
+  "version": "0.1.0",
+  "description": "Pick any image, crop and adjust it, and set it as the wallpaper of the ASCII · My Wallpaper themes.",
+  "engines": {
+    "orca": ">=1.4.246"
+  },
+  "execution": "trusted-worker",
+  "pluginApi": 1,
+  "main": "src/worker.ts",
+  "contributes": {
+    "panels": [
+      {
+        "id": "wallpaper-studio",
+        "title": "Wallpaper Studio",
+        "icon": "layers",
+        "entry": "panel/index.html"
+      }
+    ],
+    "settings": [
+      {
+        "key": "toolsDir",
+        "title": "Wallpaper tools folder",
+        "type": "string",
+        "default": "C:\\Users\\dohaidang\\orca-wallpaper",
+        "placeholder": "Folder that holds wallpaper_cli.py"
+      },
+      {
+        "key": "python",
+        "title": "Python with Pillow (full path)",
+        "type": "string",
+        "default": "C:\\Users\\dohaidang\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
+        "placeholder": "C:\\Path\\To\\python.exe"
+      }
+    ]
+  },
+  "capabilities": [
+    {
+      "kind": "settings:own"
+    }
+  ]
+}

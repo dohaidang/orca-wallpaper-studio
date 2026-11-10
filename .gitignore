@@ -1,0 +1,7 @@
+# Your own images and generated files stay out of the repository.
+library/
+__pycache__/
+*.pyc
+node_modules/
+.orca/
+debug.log
