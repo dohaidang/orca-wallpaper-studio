@@ -2,8 +2,13 @@
   "manifestVersion": 2,
   "id": "wallpaper-studio",
   "name": "Wallpaper Studio",
-  "version": "1.0.0",
-  "description": "Use your own picture as an Orca wallpaper: crop and adjust it, and Studio keeps the My Wallpaper themes up to date with it.",
+  "version": "1.0.1",
+  "description": "Use your own pictures and videos as Orca wallpapers: crop, trim and adjust them, and Studio keeps the My Wallpaper themes up to date with them.",
+  "icon": "assets/avatar.png",
+  "cover": {
+    "path": "assets/cover.png",
+    "alt": "Wallpaper Studio: a crop frame over a night landscape, with a translucent terminal and a play button, beside the title"
+  },
   "author": {
     "name": "dohaidang",
     "url": "https://github.com/dohaidang"
