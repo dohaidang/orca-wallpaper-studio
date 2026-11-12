@@ -276,5 +276,60 @@ class StudioSmokeTest(unittest.TestCase):
             shutil.rmtree(tmp, ignore_errors=True)
 
 
+@unittest.skipUnless(core.find_ffmpeg(), 'ffmpeg is not available')
+class VideoTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.plugin = make_plugin(os.path.join(self.tmp, 'plugin'))
+        core.LIBRARY_DIR = os.path.join(self.tmp, 'library')
+        self.mp4 = os.path.join(self.tmp, 'in.mp4')
+        subprocess.run([core.find_ffmpeg(), '-y', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=1280x720:rate=30:duration=6',
+                        '-pix_fmt', 'yuv420p', self.mp4], check=True)
+        self.gif = os.path.join(self.tmp, 'in.gif')
+        frames = [Image.new('RGB', (640, 360), (i * 20 % 255, 60, 120)) for i in range(8)]
+        frames[0].save(self.gif, save_all=True, append_images=frames[1:], duration=100, loop=0)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_video_file_becomes_mp4_with_still_fallback(self):
+        info = core.inspect_source(self.mp4)
+        self.assertTrue(info.video)
+        self.assertEqual((info.width, info.height), (1280, 720))
+        edit = core.Edit(mode='video', out_w=1280, out_h=720, start_s=1, end_s=4, speed=1.5, crop=[160, 0, 1120, 540])
+        summary, _, _ = core.apply_to_slot(1, info, edit, plugin_dir=self.plugin, reload=False)
+        self.assertIn('video', summary)
+        mp4 = os.path.join(self.plugin, 'images', 'custom.mp4')
+        self.assertIsNone(core.check_video(mp4))
+        self.assertAlmostEqual(core.probe_video(mp4)[2], 2.0, delta=0.3)  # 3 s at 1.5x
+        self.assertLessEqual(os.path.getsize(mp4), 8 * 1024 * 1024)
+        with Image.open(os.path.join(self.plugin, 'images', 'custom.webp')) as still:
+            self.assertEqual(still.format, 'WEBP')
+        for suffix in core.VARIANT_SUFFIXES:
+            with open(os.path.join(self.plugin, 'themes', f'custom{suffix}.json'), encoding='utf8') as f:
+                self.assertEqual(json.load(f)['background']['videoPath'], 'images/custom.mp4')
+
+    def test_animated_image_becomes_video(self):
+        info = core.inspect_source(self.gif)
+        self.assertFalse(info.video)
+        core.apply_to_slot(2, info, core.Edit(mode='video', out_w=1280, out_h=720), plugin_dir=self.plugin, reload=False)
+        self.assertIsNone(core.check_video(os.path.join(self.plugin, 'images', 'custom-2.mp4')))
+
+    def test_still_after_video_removes_the_video(self):
+        core.apply_to_slot(1, core.inspect_source(self.mp4), core.Edit(mode='video', out_w=1280, out_h=720), plugin_dir=self.plugin, reload=False)
+        still = os.path.join(self.tmp, 's.png')
+        Image.new('RGB', (1000, 600), (30, 90, 160)).save(still)
+        core.apply_to_slot(1, core.inspect_source(still), core.Edit(mode='stock', out_w=1280, out_h=720), plugin_dir=self.plugin, reload=False)
+        self.assertFalse(os.path.exists(os.path.join(self.plugin, 'images', 'custom.mp4')))
+        with open(os.path.join(self.plugin, 'themes', 'custom.json'), encoding='utf8') as f:
+            self.assertNotIn('videoPath', json.load(f)['background'])
+
+    def test_video_mode_refuses_a_still_image(self):
+        still = os.path.join(self.tmp, 's.png')
+        Image.new('RGB', (1000, 600), (30, 90, 160)).save(still)
+        with self.assertRaises(core.WallpaperError):
+            core.apply_to_slot(1, core.inspect_source(still), core.Edit(mode='video', out_w=1280, out_h=720), plugin_dir=self.plugin, reload=False)
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)

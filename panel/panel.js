@@ -14,6 +14,7 @@ const screenH = Math.round(screen.height * (devicePixelRatio || 1))
 const ASPECTS = [
   [() => tr('aspect_screen', { w: screenW, h: screenH }), screenW / screenH],
   [() => '16:9', 16 / 9], [() => '16:10', 1.6], [() => '21:9', 21 / 9], [() => '4:3', 4 / 3],
+  [() => '1:1', 1], [() => '3:4', 3 / 4], [() => '10:16', 10 / 16], [() => '9:16', 9 / 16],
   [() => tr('aspect_full'), null]
 ]
 const WIDTHS = [[() => tr('width_screen', { px: Math.min(MAX_SIDE, screenW) }), Math.min(MAX_SIDE, screenW)], [() => '1280 px', 1280], [() => '1920 px', 1920], [() => '2560 px', 2560], [() => '3840 px', 3840]]
@@ -168,16 +169,52 @@ $('file').addEventListener('change', () => {
   if (!file) return
   if (file.size > MAX_INPUT_BYTES) return setStatus(tr('too_big', { mb: MAX_INPUT_BYTES / 1048576 }), true)
   const url = URL.createObjectURL(file)
-  const image = new Image()
-  image.onload = () => {
-    Object.assign(state, { file, image, natW: image.naturalWidth, natH: image.naturalHeight, rotate: 0, flipH: false, flipV: false })
-    $('source').textContent = `${file.name}: ${image.naturalWidth}×${image.naturalHeight}, ${(file.size / 1048576).toFixed(2)} MB`
+  const isVideo = file.type.startsWith('video/') || /\.(mp4|m4v|mov|webm|mkv|avi)$/i.test(file.name)
+  const opened = (image, width, height, extra = '') => {
+    Object.assign(state, { file, library: null, image, natW: width, natH: height, rotate: 0, flipH: false, flipV: false })
+    $('source').textContent = `${file.name}: ${width}×${height}${extra}, ${(file.size / 1048576).toFixed(2)} MB`
     $('editor-box').hidden = false
+    $('editor-box').classList.remove('no-image')
+    $('video-range').hidden = !isVideo
+    $('scrub-box').hidden = !isVideo
+    state.video = isVideo ? image.__video : null
+    $('start-s').value = 0
+    $('end-s').value = -1
+    // A video can only be a video wallpaper.
+    if (isVideo) document.querySelector('input[name=mode][value=video]').checked = true
+    else if (document.querySelector('input[name=mode]:checked').value === 'video') document.querySelector('input[name=mode][value=stock]').checked = true
     rebuildOriented()
     state.crop = centeredCrop()
     setStatus('')
     redraw()
   }
+  if (isVideo) {
+    // The editor works on one picture: the first frame of the video, drawn onto a canvas.
+    const video = document.createElement('video')
+    video.muted = true
+    video.preload = 'auto'
+    video.onloadeddata = () => {
+      const canvas = document.createElement('canvas')
+      canvas.width = video.videoWidth
+      canvas.height = video.videoHeight
+      canvas.getContext('2d').drawImage(video, 0, 0)
+      const seconds = Number.isFinite(video.duration) ? `, ${Math.round(video.duration)} s` : ''
+      canvas.__video = video // kept (with its object URL) so the time slider can show other frames
+      opened(canvas, video.videoWidth, video.videoHeight, seconds)
+      const total = Number.isFinite(video.duration) ? video.duration : 1
+      for (const id of ['scrub', 'trim-start', 'trim-end']) $(id).max = total
+      $('scrub').value = 0
+      $('trim-start').value = 0
+      $('trim-end').value = total
+      $('scrub-time').textContent = '0.0'
+      showTrim()
+    }
+    video.onerror = () => { URL.revokeObjectURL(url); setStatus(tr('cannot_open'), true) }
+    video.src = url
+    return
+  }
+  const image = new Image()
+  image.onload = () => opened(image, image.naturalWidth, image.naturalHeight)
   image.onerror = () => { URL.revokeObjectURL(url); setStatus(tr('cannot_open'), true) }
   image.src = url
 })
@@ -228,6 +265,89 @@ document.addEventListener('click', (event) => {
   state.crop = centeredCrop()
   redraw()
 })
+// ---------- video time slider ----------
+// Seeks the hidden <video> and paints that frame into the editor's picture, so the crop and the preview show it.
+$('scrub').addEventListener('input', () => {
+  const video = state.video
+  if (!video) return
+  $('scrub-time').textContent = (+$('scrub').value).toFixed(1)
+  video.currentTime = +$('scrub').value
+})
+document.addEventListener('seeked', (event) => {
+  const video = state.video
+  if (!video || event.target !== video) return
+  state.image.getContext('2d').drawImage(video, 0, 0)
+  rebuildOriented()
+  redraw()
+}, true)
+// Start / end of the part to use: two handles on one track, kept in step with the two number boxes.
+function showTrim() {
+  const total = +$('trim-end').max
+  const start = +$('trim-start').value, end = +$('trim-end').value
+  $('start-s').value = start.toFixed(1)
+  $('end-s').value = end >= total - 0.05 ? -1 : end.toFixed(1)
+  $('trim-label').textContent = `${start.toFixed(1)} – ${end.toFixed(1)}  (${(end - start).toFixed(1)} s)`
+  const pct = (v) => `${(v / Math.max(0.1, total)) * 100}%`
+  $('trim-start').parentElement.style.setProperty('--a', pct(start))
+  $('trim-start').parentElement.style.setProperty('--b', pct(end))
+}
+for (const id of ['trim-start', 'trim-end']) {
+  $(id).addEventListener('input', () => {
+    const a = $('trim-start'), b = $('trim-end')
+    if (+a.value > +b.value - 0.2) { if (id === 'trim-start') a.value = +b.value - 0.2; else b.value = +a.value + 0.2 }
+    if (+a.value < 0) a.value = 0
+    showTrim()
+    if (state.video) { stopPlay(); state.video.currentTime = +$(id).value; $('scrub').value = $(id).value; $('scrub-time').textContent = (+$(id).value).toFixed(1) }
+  })
+}
+for (const id of ['start-s', 'end-s']) {
+  $(id).addEventListener('change', () => {
+    const total = +$('trim-end').max
+    $('trim-start').value = Math.max(0, +$('start-s').value || 0)
+    $('trim-end').value = +$('end-s').value < 0 ? total : Math.min(total, +$('end-s').value)
+    showTrim()
+  })
+}
+$('set-start').addEventListener('click', () => {
+  $('trim-start').value = Math.min(+$('scrub').value, +$('trim-end').value - 0.2)
+  showTrim()
+})
+$('set-end').addEventListener('click', () => {
+  $('trim-end').value = Math.max(+$('scrub').value, +$('trim-start').value + 0.2)
+  showTrim()
+})
+
+// Preview: plays the chosen part in the editor, looping, at the chosen speed.
+let playing = false
+function stopPlay() {
+  playing = false
+  if (state.video) state.video.pause()
+  $('play').textContent = tr('play')
+}
+function playLoop() {
+  const video = state.video
+  if (!playing || !video) return
+  const start = +$('trim-start').value, end = +$('trim-end').value
+  if (video.currentTime >= end - 0.03 || video.currentTime < start - 0.05) video.currentTime = start
+  state.image.getContext('2d').drawImage(video, 0, 0)
+  rebuildOriented()
+  redraw()
+  $('scrub').value = video.currentTime
+  $('scrub-time').textContent = video.currentTime.toFixed(1)
+  requestAnimationFrame(playLoop)
+}
+$('play').addEventListener('click', () => {
+  const video = state.video
+  if (!video) return
+  if (playing) return stopPlay()
+  playing = true
+  video.playbackRate = Math.min(4, Math.max(0.25, +$('speed').value || 1))
+  const start = +$('trim-start').value
+  if (video.currentTime < start || video.currentTime >= +$('trim-end').value - 0.05) video.currentTime = start
+  $('play').textContent = tr('pause')
+  video.play().then(() => requestAnimationFrame(playLoop)).catch(() => stopPlay())
+})
+$('scrub').addEventListener('input', stopPlay)
 $('aspect').addEventListener('change', () => { if (state.image) { state.crop = centeredCrop(); redraw() } })
 for (const id of ['width', 'brightness', 'darken', 'blur', 'opacity', 'size', 'position', 'speed']) {
   $(id).addEventListener('input', () => { showValue(id); redraw() })
@@ -282,13 +402,15 @@ function currentEdit() {
     brightness: +$('brightness').value, darken: +$('darken').value, blur: +$('blur').value,
     opacity: +$('opacity').value, size: $('size').value, position: $('position').value,
     mode: document.querySelector('input[name=mode]:checked').value,
-    speed: +$('speed').value, first_frame: Math.max(0, Math.round(+$('first').value || 0)),
+    speed: +$('speed').value, start_s: Math.max(0, +$('start-s').value || 0), end_s: Math.max(-1, +$('end-s').value || 0),
+    first_frame: Math.max(0, Math.round(+$('first').value || 0)),
     last_frame: Math.max(-1, Math.round(+$('last').value)), frame_step: Math.min(4, Math.max(1, Math.round(+$('step').value || 1)))
   }
 }
 
 $('apply').addEventListener('click', async () => {
-  if (!state.file || state.busy) return
+  stopPlay()
+  if ((!state.file && !state.library) || state.busy) return
   state.busy = true
   state.cancelled = false
   state.uploadId = null
@@ -297,21 +419,30 @@ $('apply').addEventListener('click', async () => {
   $('cancel').disabled = false
   const slot = +document.querySelector('input[name=slot]:checked').value
   try {
-    setStatus(tr('sending'))
-    setProgress(0)
-    const bytes = new Uint8Array(await state.file.arrayBuffer())
-    const { id, chunkBytes } = await orca.plugin.request('upload.begin', { name: state.file.name, size: bytes.length, lang: language })
-    state.uploadId = id
-    const chunks = Math.ceil(bytes.length / chunkBytes)
-    for (let i = 0; i < chunks; i++) {
-      if (state.cancelled) return
-      await requestPaced('upload.chunk', { id, index: i, data: base64(bytes.subarray(i * chunkBytes, (i + 1) * chunkBytes)) })
-      setProgress((i + 1) / chunks * 0.3)
-      setStatus(tr('sending_n', { i: i + 1, n: chunks }))
+    let id
+    if (state.file) {
+      setStatus(tr('sending'))
+      setProgress(0)
+      const bytes = new Uint8Array(await state.file.arrayBuffer())
+      const begun = await orca.plugin.request('upload.begin', { name: state.file.name, size: bytes.length, lang: language })
+      id = begun.id
+      state.uploadId = id
+      const chunks = Math.ceil(bytes.length / begun.chunkBytes)
+      for (let i = 0; i < chunks; i++) {
+        if (state.cancelled) return
+        await requestPaced('upload.chunk', { id, index: i, data: base64(bytes.subarray(i * begun.chunkBytes, (i + 1) * begun.chunkBytes)) })
+        setProgress((i + 1) / chunks * 0.3)
+        setStatus(tr('sending_n', { i: i + 1, n: chunks }))
+      }
     }
     if (state.cancelled) return
     setStatus(tr('processing'))
-    const { job } = await orca.plugin.request('wallpaper.apply', { id, slot, edit: currentEdit(), lang: language })
+    // Without a file in the panel the worker uses the picture saved for the slot that was reopened.
+    // Only fields that have a value: Orca rejects a request that carries undefined.
+    const payload = { slot, edit: currentEdit(), lang: language }
+    if (state.file) payload.id = id
+    else payload.library = state.library
+    const { job } = await orca.plugin.request('wallpaper.apply', payload)
     state.uploadId = null
     state.job = job
     if (state.cancelled) return void orca.plugin.request('wallpaper.cancel', { job, lang: language }).catch(() => {})
@@ -395,10 +526,14 @@ orca.plugin.request('wallpaper.env').then(({ terminalOpacity }) => {
 // newest job (the worker reads it from the job file): still running, or finished a moment ago.
 function resumeJob() {
   orca.plugin.request('wallpaper.recent', {}).then((recent) => {
-    if (!recent || !recent.job || state.busy) return
+    if (!recent || !recent.job) return void restoreFromLibrary(0)
+    if (state.busy) return
     state.job = recent.job
     $('editor-box').hidden = false
-    if (recent.state === 'done') return showResult(recent.job, recent.result?.slot || 1, recent.result || {})
+    if (recent.state === 'done') {
+      showResult(recent.job, recent.result?.slot || 1, recent.result || {})
+      return void restoreFromLibrary(recent.result?.slot || 0)
+    }
     state.busy = true
     $('apply').disabled = true
     $('cancel').hidden = false
@@ -409,10 +544,59 @@ function resumeJob() {
   }).catch(() => {})
 }
 
+// ---------- reopening a saved slot ----------
+// The Python tool keeps each slot's original picture, a small preview and the settings used. After Apply (which
+// makes Orca reload the panel) and whenever the panel opens, the editor comes back with the last slot's preview
+// and settings, so they can be adjusted and applied again; the original never travels to the panel.
+async function restoreFromLibrary(wantedSlot) {
+  if (state.file || state.library) return
+  try {
+    const first = await orca.plugin.request('library.get', { slot: wantedSlot || 0, index: 0 })
+    if (!first || !first.slot) return
+    const parts = [first.data]
+    for (let i = 1; i < first.chunks; i++) parts.push((await requestPaced('library.get', { slot: first.slot, index: i })).data)
+    const binary = atob(parts.join(''))
+    const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0))
+    const url = URL.createObjectURL(new Blob([bytes], { type: 'image/jpeg' }))
+    const image = new Image()
+    await new Promise((resolve, reject) => { image.onload = resolve; image.onerror = reject; image.src = url })
+    URL.revokeObjectURL(url)
+    if (state.file || state.library) return // the user picked something while this loaded
+    const saved = first.settings, e = saved.edit || {}
+    // The editor shows the small preview scaled to the original's size, so the crop keeps the original's pixels.
+    Object.assign(state, { library: first.slot, image, natW: saved.width, natH: saved.height, rotate: e.rotate || 0, flipH: !!e.flip_h, flipV: !!e.flip_v })
+    const set = (id, value) => { if (value !== undefined && value !== null) { $(id).value = value; showValue(id) } }
+    ;['brightness', 'darken', 'blur', 'opacity', 'size', 'position', 'speed'].forEach((id) => set(id, e[id]))
+    set('first', e.first_frame); set('last', e.last_frame); set('step', e.frame_step)
+    set('start-s', e.start_s); set('end-s', e.end_s)
+    let nearest = 0
+    WIDTHS.forEach(([, w], i) => { if (Math.abs(w - e.out_w) < Math.abs(WIDTHS[nearest][1] - e.out_w)) nearest = i })
+    $('width').selectedIndex = nearest
+    const radio = (name, value) => { const r = document.querySelector(`input[name=${name}][value="${value}"]`); if (r) r.checked = true }
+    radio('slot', first.slot)
+    radio('mode', e.mode || 'stock')
+    const [ow, oh] = orientedSize()
+    const crop = Array.isArray(e.crop) && e.crop.length === 4 ? e.crop : [0, 0, ow, oh]
+    const ratio = (crop[2] - crop[0]) / Math.max(1, crop[3] - crop[1])
+    let pick = ASPECTS.findIndex(([, a]) => a && Math.abs(a - ratio) < 0.02)
+    if (pick < 0) pick = crop[2] - crop[0] >= ow - 1 && crop[3] - crop[1] >= oh - 1 ? ASPECTS.length - 1 : 0
+    $('aspect').selectedIndex = pick
+    $('video-range').hidden = !saved.video
+    const name = String(saved.original || '').split(/[\\/]/).pop() || ''
+    $('source').textContent = tr('restored', { name: 'My Wallpaper' + (first.slot === 1 ? '' : ` ${first.slot}`), file: name, w: saved.width, h: saved.height })
+    $('editor-box').hidden = false
+    rebuildOriented()
+    state.crop = clampCrop(crop)
+    redraw()
+  } catch {
+    // nothing to reopen
+  }
+}
+
 // ---------- language ----------
 /** Texts that are built in code rather than written in index.html. */
 function updateTexts() {
-  if (!state.file) $('source').textContent = tr('source_hint')
+  if (!state.file && !state.library) $('source').textContent = tr('source_hint')
   $('preview-note').textContent = state.opacityKnown ? tr('preview_note_opacity', { v: state.terminalOpacity }) : tr('preview_note')
 }
 function applyLanguage() {
@@ -434,3 +618,7 @@ function checkLanguage() {
 window.addEventListener('focus', checkLanguage)
 document.addEventListener('visibilitychange', checkLanguage)
 setInterval(checkLanguage, 2000)
+
+// The Apply bar shows only while the editor does (errors before that still show in the bar's status line).
+new MutationObserver(() => document.body.classList.toggle('has-editor', !$('editor-box').hidden))
+  .observe($('editor-box'), { attributes: true, attributeFilter: ['hidden'] })

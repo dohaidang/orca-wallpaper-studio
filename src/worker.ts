@@ -163,6 +163,32 @@ function appData(): string {
 // Jobs report through files here, outside the plugin folder (Orca restarts the worker when files inside it change).
 const JOBS_DIR = join(appData(), 'orca-wallpaper-studio', 'jobs')
 const JOB_FILE_KEEP_MS = 24 * 60 * 60 * 1000
+// Each slot's original picture, preview and settings (written by the Python tool), so the panel can reopen a slot.
+const LIBRARY_DIR = process.env.WALLPAPER_STUDIO_LIBRARY || join(appData(), 'orca-wallpaper-studio', 'library')
+
+type LibrarySlot = { source: string; edit?: Record<string, unknown>; width?: number; height?: number; video?: boolean }
+
+function readLibrary(slot: number): LibrarySlot | null {
+  try {
+    return JSON.parse(readFileSync(join(LIBRARY_DIR, `slot-${slot}`, 'settings.json'), 'utf8')) as LibrarySlot
+  } catch {
+    return null
+  }
+}
+
+/** The slot whose settings were saved last (slot 0 in a request means "the newest"). */
+function newestLibrarySlot(): number | null {
+  let best: { slot: number; mtime: number } | null = null
+  for (const slot of [1, 2, 3]) {
+    try {
+      const mtime = statSync(join(LIBRARY_DIR, `slot-${slot}`, 'settings.json')).mtimeMs
+      if (!best || mtime > best.mtime) best = { slot, mtime }
+    } catch {
+      // nothing saved for this slot
+    }
+  }
+  return best?.slot ?? null
+}
 
 type JobFile = { state: 'running' | 'done'; pid?: number; text?: string; result?: Record<string, unknown> | null }
 
@@ -306,12 +332,30 @@ export default function activate(orca: OrcaWorkerApi): void {
     return { terminalOpacity: 0.6, error: String(answer.error ?? 'unknown error') }
   })
 
+  // Reopening a slot: its saved settings plus a small JPEG of the picture, sent in chunks (a reply carries at most
+  // 64 KiB). Slot 0 means the slot saved last. Without a usable preview there is nothing to reopen.
+  orca.panels.handle('library.get', async ({ slot, index }: { slot?: number; index?: number }) => {
+    const wanted = Number(slot) === 0 || slot === undefined ? newestLibrarySlot() : Number(slot)
+    if (!wanted || ![1, 2, 3].includes(wanted)) return { slot: null }
+    const settings = readLibrary(wanted)
+    if (!settings || !settings.width || !settings.height) return { slot: null }
+    try {
+      const preview = readFileSync(join(LIBRARY_DIR, `slot-${wanted}`, 'preview.jpg'))
+      const chunks = Math.max(1, Math.ceil(preview.length / MAX_CHUNK_BYTES))
+      const at = Math.min(Math.max(0, Math.floor(Number(index) || 0)), chunks - 1)
+      const data = preview.subarray(at * MAX_CHUNK_BYTES, (at + 1) * MAX_CHUNK_BYTES).toString('base64')
+      return { slot: wanted, settings, chunks, index: at, data }
+    } catch {
+      return { slot: null }
+    }
+  })
+
   orca.panels.handle('upload.begin', async ({ name, size, lang }: { name: string; size: number; lang?: string }) => {
     setLanguage(lang)
     if (!Number.isFinite(size) || size <= 0 || size > MAX_UPLOAD_BYTES) {
       throw fail('invalid_params', say('too_big', { mb: MAX_UPLOAD_BYTES / 1048576 }))
     }
-    const ext = /\.(jpe?g|png|webp|bmp|gif)$/i.exec(String(name ?? ''))?.[0].toLowerCase() ?? '.img'
+    const ext = /\.(jpe?g|png|webp|bmp|gif|mp4|m4v|mov|webm|mkv|avi)$/i.exec(String(name ?? ''))?.[0].toLowerCase() ?? '.img'
     const dir = await mkdtemp(join(tmpdir(), 'orca-wallpaper-'))
     const file = join(dir, 'source' + ext)
     await writeFile(file, new Uint8Array(0))
@@ -342,9 +386,21 @@ export default function activate(orca: OrcaWorkerApi): void {
   // the file and tells the panel; a restarted worker answers status requests from the same file.
   orca.panels.handle(
     'wallpaper.apply',
-    async ({ id, slot, edit, lang }: { id: string; slot: number; edit: unknown; lang?: string }, context: { panel?: string } = {}) => {
+    async (
+      { id: sentId, slot, edit, lang, library }: { id?: string; slot: number; edit: unknown; lang?: string; library?: number },
+      context: { panel?: string } = {}
+    ) => {
       setLanguage(lang)
-      const upload = uploads.get(id)
+      let id = String(sentId ?? '')
+      let upload = uploads.get(id)
+      if (library) {
+        // Apply again from the picture saved for a slot: nothing is uploaded; the folder only holds edit.json.
+        const saved = [1, 2, 3].includes(library) ? readLibrary(library) : null
+        if (!saved?.source) throw fail('conflict', say('not_sent'))
+        id = randomUUID()
+        upload = { dir: await mkdtemp(join(tmpdir(), 'orca-wallpaper-')), file: join(LIBRARY_DIR, `slot-${library}`, saved.source), expected: 0, received: 0, next: 0, touched: Date.now() }
+        uploads.set(id, upload)
+      }
       if (!upload || upload.received !== upload.expected) throw fail('conflict', say('not_sent'))
       if (![1, 2, 3].includes(slot)) throw fail('invalid_params', say('bad_slot'))
       const job = randomUUID()

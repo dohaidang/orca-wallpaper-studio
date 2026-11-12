@@ -8,34 +8,89 @@
   --primary: var(--orca-primary, #8ab4ff);
   --primary-fg: var(--orca-primary-foreground, #0d1a33);
   --radius: var(--orca-radius, 8px);
+  --line: color-mix(in srgb, var(--fg) 12%, transparent);
 }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--fg); font: 12px/1.45 system-ui, "Segoe UI", sans-serif; }
-main { padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+main { padding: 12px 12px 8px; display: flex; flex-direction: column; gap: 10px; }
+#editor-box { display: flex; flex-direction: column; gap: 10px; }
 .muted { color: var(--muted); margin: 4px 0; }
 .small { font-size: 11px; }
-fieldset { border: 1px solid var(--border); border-radius: var(--radius); margin: 0; padding: 6px 8px 8px; display: flex; flex-direction: column; gap: 4px; }
-legend { color: var(--muted); padding: 0 4px; font-size: 11px; }
-label { display: flex; flex-direction: column; gap: 2px; }
-label output { color: var(--muted); font-variant-numeric: tabular-nums; }
-label.inline { flex-direction: row; align-items: center; gap: 4px; }
-.row { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.hint { margin: -4px 0 0; }
+
+/* Picture frame: corner marks like a camera viewfinder, around the one thing the panel is about. */
+.frame { position: relative; padding: 6px; background: var(--card); border-radius: var(--radius); }
+.frame::before, .frame::after { content: ""; position: absolute; width: 12px; height: 12px; pointer-events: none; border: 0 solid var(--primary); }
+.frame::before { top: 0; left: 0; border-width: 2px 0 0 2px; border-top-left-radius: var(--radius); }
+.frame::after { right: 0; bottom: 0; border-width: 0 2px 2px 0; border-bottom-right-radius: var(--radius); }
+.small-frame { padding: 4px; }
+canvas { display: block; width: 100%; border-radius: 4px; background: #0b0b0c; }
+#editor { cursor: grab; touch-action: none; }
+#editor.dragging { cursor: grabbing; }
+
+/* Settings groups collapse; the two used on every picture start open. */
+details { border-top: 1px solid var(--line); }
+details:last-of-type { border-bottom: 1px solid var(--line); }
+summary { cursor: pointer; padding: 8px 2px; font-weight: 600; list-style: none; display: flex; justify-content: space-between; align-items: center; }
+summary::-webkit-details-marker { display: none; }
+summary::after { content: ""; width: 6px; height: 6px; border: solid var(--muted); border-width: 0 1.5px 1.5px 0; transform: rotate(45deg); transition: transform .15s; margin-right: 4px; }
+details[open] > summary::after { transform: rotate(-135deg); }
+summary:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; border-radius: 4px; }
+.body { display: flex; flex-direction: column; gap: 8px; padding: 2px 2px 12px; }
+
+label { display: flex; flex-direction: column; gap: 3px; }
+label output { color: var(--muted); font-variant-numeric: tabular-nums; margin-left: 4px; }
+label.inline { flex-direction: row; align-items: center; gap: 6px; }
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.tools { display: grid; grid-template-columns: repeat(4, 1fr) auto; gap: 6px; }
 input[type=range] { width: 100%; accent-color: var(--primary); }
-input[type=number] { width: 52px; }
-select, input[type=number] { background: var(--card); color: var(--fg); border: 1px solid var(--border); border-radius: 6px; padding: 3px 4px; }
-button, .button { background: var(--card); color: var(--fg); border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; cursor: pointer; font: inherit; display: inline-block; text-align: center; }
+input[type=number] { width: 60px; }
+select, input[type=number] { background: var(--card); color: var(--fg); border: 1px solid var(--border); border-radius: 6px; padding: 5px 6px; font: inherit; }
+select { width: 100%; }
+label.inline select { width: auto; }
+button, .button { background: var(--card); color: var(--fg); border: 1px solid var(--border); border-radius: 6px; padding: 5px 9px; cursor: pointer; font: inherit; display: inline-block; text-align: center; }
 button:hover, .button:hover { border-color: var(--primary); }
 button:focus-visible, .button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
 .primary { background: var(--primary); color: var(--primary-fg); border-color: var(--primary); font-weight: 600; }
-.wide { width: 100%; padding: 7px; }
 button:disabled { opacity: .5; cursor: default; }
-/* Without this, the display rules above (such as button's inline-block) override the hidden attribute and the
-   Cancel button never hides. */
-[hidden] { display: none !important; }
-canvas { display: block; width: 100%; border-radius: 6px; background: #0b0b0c; }
-#editor { cursor: grab; touch-action: none; }
-#editor.dragging { cursor: grabbing; }
+.pick .button { display: block; padding: 9px; }
+
+/* Wallpaper slot: three buttons that act as one control. */
+.segmented { display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.segmented label { display: block; }
+.segmented input { position: absolute; opacity: 0; pointer-events: none; }
+.segmented span { display: block; padding: 6px 0; text-align: center; cursor: pointer; background: var(--card); font-variant-numeric: tabular-nums; }
+.segmented label + label span { border-left: 1px solid var(--border); }
+.segmented input:checked + span { background: var(--primary); color: var(--primary-fg); font-weight: 600; }
+.segmented input:focus-visible + span { outline: 2px solid var(--primary); outline-offset: -2px; }
+.choices { display: flex; flex-direction: column; gap: 6px; }
+.choices label { flex-direction: row; align-items: flex-start; gap: 6px; }
+.choices input { margin-top: 2px; accent-color: var(--primary); }
+
+.scrub { display: flex; flex-direction: column; gap: 6px; padding: 8px; background: var(--card); border-radius: var(--radius); }
+
+/* Apply, progress and the result stay at the bottom while the settings scroll. */
+#dock { position: sticky; bottom: 0; padding: 8px 12px 10px; background: var(--bg); border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 6px; }
+body:not(.has-editor) #dock:has(#status:empty) { display: none; }
+.actions { display: none; gap: 6px; }
+body.has-editor .actions { display: flex; }
+.actions button { flex: 1; padding: 8px; }
 #progress { height: 4px; background: var(--card); border-radius: 2px; overflow: hidden; }
 #bar { height: 100%; width: 0; background: var(--primary); transition: width .15s; }
-#status { white-space: pre-wrap; margin: 4px 0 0; }
+#status { white-space: pre-wrap; margin: 0; max-height: 7.5em; overflow: auto; }
+#status:empty { display: none; }
 #status.error { color: #f28b82; }
+/* The display rules above would otherwise override the hidden attribute. */
+[hidden] { display: none !important; }
+@media (prefers-reduced-motion: reduce) { summary::after, #bar { transition: none; } }
+
+.scrub .row { align-items: flex-end; }
+.grow { flex: 1; min-width: 0; }
+.play { min-width: 92px; }
+.trim { display: flex; flex-direction: column; gap: 4px; }
+.dual { position: relative; height: 22px; --a: 0%; --b: 100%; }
+.dual::before { content: ""; position: absolute; left: 7px; right: 7px; top: 9px; height: 4px; border-radius: 2px;
+  background: linear-gradient(to right, var(--border) var(--a), var(--primary) var(--a), var(--primary) var(--b), var(--border) var(--b)); }
+.dual input { position: absolute; inset: 0; width: 100%; margin: 0; background: transparent; pointer-events: none; -webkit-appearance: none; appearance: none; }
+.dual input::-webkit-slider-runnable-track { background: transparent; }
+.dual input::-webkit-slider-thumb { pointer-events: auto; -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%; background: var(--primary); border: 2px solid var(--bg); cursor: ew-resize; margin-top: 4px; }

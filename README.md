@@ -5,6 +5,7 @@ Use your own picture as an Orca wallpaper. Pick an image, crop and adjust it, an
 - Opens JPG, PNG, WebP, BMP and GIF (animated too), up to 50 MB.
 - A crop editor with aspect ratios (screen, 16:9, 16:10, 21:9, 4:3, the whole image), rotate and flip, brightness, darken and blur, and a live preview under Orca's translucent terminal.
 - Three wallpaper slots (**My Wallpaper**, **My Wallpaper 2**, **My Wallpaper 3**), each with a dark-sidebar and a light-sidebar variant, plus a Cancel button while it works.
+- **Video wallpapers** (Orca 1.4.254 or newer): open an MP4, MOV, WebM, MKV or AVI video, or an animated GIF/WebP, trim it to up to 60 seconds, change its speed, crop and adjust it like a picture, and Studio encodes an H.264 MP4 of at most 8 MB (20 fps, no audio) and sets it as the theme's `background.videoPath`. A still copy of the first frame stays beside it as the fallback. Orca plays it only while Background Opacity is below 1 and Reduce Visual Effects is off. Needs `ffmpeg` (see Requirements).
 - A panel that follows Orca's language (Vietnamese or English).
 - A desktop tool (`tools/wallpaper_studio.py`) with the same editor in a small Tk window.
 
@@ -14,6 +15,7 @@ It is one plugin and needs no other: the **My Wallpaper** themes are part of Wal
 
 - Orca **1.4.246 or newer**.
 - **Python 3 with [Pillow](https://pypi.org/project/Pillow/)**: `pip install Pillow`. The plugin looks for Python by itself (`py -3`, `python3`, `python` and the usual per-user install folders). Set **Python with Pillow** in the plugin's settings only if it cannot find one.
+- **ffmpeg with libx264, only for video wallpapers**: `pip install imageio-ffmpeg` (into the same Python; it brings its own ffmpeg), or put `ffmpeg` on your `PATH`, or set the `WALLPAPER_FFMPEG` environment variable to the executable. Pictures work without it.
 
 ## Install
 

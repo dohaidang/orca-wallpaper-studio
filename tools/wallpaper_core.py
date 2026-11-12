@@ -11,6 +11,7 @@ import re
 import shutil
 import sqlite3
 import subprocess
+import tempfile
 from dataclasses import asdict, dataclass, field
 
 from PIL import Image, ImageEnhance, ImageFilter, ImageOps, ImageSequence
@@ -183,7 +184,15 @@ MAX_ANIMATED_PIXELS = 2_000_000_000  # width * height * frames held in memory
 MODES = {
     'patched': {'label': 'Orca đã vá: tĩnh hoặc động, tối đa 16 MB', 'max_bytes': 16 * 1024 * 1024, 'animated': True},
     'stock': {'label': 'Orca chuẩn: chỉ ảnh tĩnh, tối đa 2 MB', 'max_bytes': 2 * 1024 * 1024, 'animated': False},
+    # Orca 1.4.254+ plays background.videoPath: H.264 MP4, no audio, <= 8 MB, <= 60 s, <= 2,304,000 px. A still
+    # image (<= 2 MB) is kept beside it as the fallback.
+    'video': {'label': 'Video (Orca 1.4.254+): MP4 tối đa 8 MB', 'max_bytes': 2 * 1024 * 1024, 'animated': False, 'video': True},
 }
+VIDEO_EXTENSIONS = ('.mp4', '.m4v', '.mov', '.webm', '.mkv', '.avi')
+VIDEO_MAX_BYTES = 7 * 1024 * 1024 + 512 * 1024  # Orca allows 8 MB; leave a margin
+VIDEO_MAX_PIXELS = 2_304_000
+VIDEO_MAX_SECONDS = 60
+VIDEO_FPS = 20
 MIN_W, MIN_H, MAX_SIDE = 640, 360, 4096
 SIZES = ('cover', 'contain', 'tile')
 POSITIONS = ('center', 'top', 'bottom', 'left', 'right')
@@ -221,6 +230,14 @@ _MESSAGES = {
     'reload_failed': ('Orca không nạp được thư mục theme.', 'Orca could not load the theme folder.'),
     'themes_dir_failed': ('Không tạo được thư mục theme My Wallpaper tại {folder}: {error}', 'Could not create the My Wallpaper theme folder at {folder}: {error}'),
     'no_python': ('Không tìm thấy Python có Pillow. Hãy cài Python 3 rồi chạy "pip install Pillow", hoặc nhập đường dẫn python.exe trong cài đặt plugin.', 'No Python with Pillow was found. Install Python 3 and run "pip install Pillow", or enter the path of python.exe in the plugin settings.'),
+    'ffmpeg_missing': ('Không tìm thấy ffmpeg. Hãy chạy "pip install imageio-ffmpeg" (cùng Python của Studio), hoặc cài ffmpeg vào PATH, để làm video.', 'ffmpeg was not found. Run "pip install imageio-ffmpeg" (with the Python Studio uses) or put ffmpeg on your PATH to make videos.'),
+    'ffmpeg_failed': ('ffmpeg báo lỗi: {tail}', 'ffmpeg reported an error: {tail}'),
+    'video_unreadable': ('Không đọc được video này.', 'Could not read this video.'),
+    'video_needs_motion': ('Chế độ Video cần một video hoặc ảnh động (GIF, WebP động).', 'Video mode needs a video or an animated image (GIF, animated WebP).'),
+    'video_encoding': ('Đang nén video: {w}×{h}, CRF {crf}…', 'Encoding the video: {w}×{h}, CRF {crf}…'),
+    'video_cannot_compress': ('Không nén được video xuống dưới 8 MB. Hãy cắt ngắn hoặc giảm kích thước.', 'Could not compress the video below 8 MB. Trim it or reduce its size.'),
+    'video_trimmed': ('cắt còn {s} giây (tối đa {max} giây)', 'trimmed to {s} seconds (the limit is {max} seconds)'),
+    'kind_video': ('video, {s} giây', 'video, {s} s'),
     'usage': ('Cách dùng: wallpaper_cli.py apply <ảnh> <ô> <edit.json> | env', 'Usage: wallpaper_cli.py apply <image> <slot> <edit.json> | env'),
 }
 
@@ -258,6 +275,8 @@ class Edit:
     position: str = 'center'
     mode: str = 'patched'
     speed: float = 1.0            # animated only: 2.0 plays twice as fast
+    start_s: float = 0.0          # video mode: trim start, seconds
+    end_s: float = -1.0           # video mode: trim end, seconds; -1 = to the end
     first_frame: int = 0          # animated only: trim
     last_frame: int = -1          # animated only: -1 = last frame
     frame_step: int = 1           # animated only: keep every Nth frame
@@ -271,6 +290,44 @@ class SourceInfo:
     frames: int
     seconds: float
     animated: bool
+    video: bool = False   # a real video file (read with ffmpeg), not an image Pillow can open
+
+
+def find_ffmpeg():
+    """An ffmpeg with libx264: WALLPAPER_FFMPEG, then PATH, then the one the imageio-ffmpeg package carries."""
+    candidates = [os.environ.get('WALLPAPER_FFMPEG', ''), shutil.which('ffmpeg') or '']
+    try:
+        import imageio_ffmpeg
+        candidates.append(imageio_ffmpeg.get_ffmpeg_exe())
+    except Exception:  # not installed, or its binary is missing
+        pass
+    for path in candidates:
+        if path and os.path.isfile(path):
+            return path
+    return None
+
+
+def _quiet():
+    return {'creationflags': 0x08000000} if os.name == 'nt' else {}  # no console window
+
+
+def probe_video(path):
+    """(width, height, seconds) of a video file as ffmpeg reads it, or raise WallpaperError."""
+    ffmpeg = find_ffmpeg()
+    if not ffmpeg:
+        raise WallpaperError(msg('ffmpeg_missing'))
+    done = subprocess.run([ffmpeg, '-hide_banner', '-i', path], capture_output=True, text=True, errors='replace', **_quiet())
+    text = done.stderr or ''
+    size = re.search(r'Video:.*?\b(\d{2,5})x(\d{2,5})\b', text)
+    length = re.search(r'Duration: (\d+):(\d+):(\d+(?:\.\d+)?)', text)
+    if not size:
+        raise WallpaperError(msg('video_unreadable'))
+    w, h = int(size.group(1)), int(size.group(2))
+    turned = re.search(r'rotation of (-?[\d.]+) degrees', text)
+    if turned and round(abs(float(turned.group(1))) / 90) % 2 == 1:
+        w, h = h, w  # ffmpeg turns the picture upright by itself
+    seconds = int(length.group(1)) * 3600 + int(length.group(2)) * 60 + float(length.group(3)) if length else 0.0
+    return w, h, seconds
 
 
 def inspect_source(path):
@@ -279,6 +336,11 @@ def inspect_source(path):
         raise WallpaperError(msg('not_found'))
     if os.path.getsize(path) > MAX_INPUT_BYTES:
         raise WallpaperError(msg('file_too_big', mb=MAX_INPUT_BYTES // 1048576))
+    if path.lower().endswith(VIDEO_EXTENSIONS):
+        w, h, seconds = probe_video(path)
+        if max(w, h) > MAX_INPUT_SIDE:
+            raise WallpaperError(msg('image_too_big', side=MAX_INPUT_SIDE))
+        return SourceInfo(path, w, h, 1, seconds, True, True)
     try:
         with Image.open(path) as im:
             w, h = im.size
@@ -403,6 +465,124 @@ def encode(info, edit, out_path, progress=lambda text: None):
     raise WallpaperError(msg('cannot_compress', mb=mode["max_bytes"] // 1048576))
 
 
+def _ffmpeg_vf(edit, scale, width, height, from_video):
+    """The ffmpeg filter chain: orientation and crop (video sources only: image frames arrive rendered),
+    scale, brightness/darken, blur, speed, frame rate."""
+    chain = []
+    if from_video:
+        chain += {90: ['transpose=1'], 180: ['hflip', 'vflip'], 270: ['transpose=2']}.get(edit.rotate, [])
+        if edit.flip_h:
+            chain.append('hflip')
+        if edit.flip_v:
+            chain.append('vflip')
+        if edit.crop:
+            left, top, right, bottom = (int(v) for v in edit.crop)
+            chain.append(f'crop={(right - left) // 2 * 2}:{(bottom - top) // 2 * 2}:{left}:{top}')
+        if abs(edit.speed - 1.0) > 1e-3:
+            chain.append(f'setpts=PTS/{max(0.1, edit.speed):.4f}')
+    chain.append(f'scale={width}:{height}:flags=lanczos')
+    factor = edit.brightness * (1 - edit.darken)  # both are plain multiplications of the colour
+    if abs(factor - 1.0) > 1e-3:
+        chain.append(f'colorchannelmixer=rr={factor:.4f}:gg={factor:.4f}:bb={factor:.4f}')
+    if edit.blur > 0:
+        chain.append(f'gblur=sigma={max(0.1, edit.blur * scale):.2f}')
+    chain += [f'fps={VIDEO_FPS}', 'format=yuv420p']
+    return ','.join(chain)
+
+
+def _run_ffmpeg(args):
+    ffmpeg = find_ffmpeg()
+    if not ffmpeg:
+        raise WallpaperError(msg('ffmpeg_missing'))
+    done = subprocess.run([ffmpeg, '-hide_banner', '-loglevel', 'error', '-y', *args], capture_output=True, text=True,
+                          errors='replace', **_quiet())
+    if done.returncode != 0:
+        tail = ' '.join((done.stderr or '').strip().splitlines()[-3:])
+        raise WallpaperError(msg('ffmpeg_failed', tail=tail[-300:]))
+
+
+def encode_video(info, edit, out_path, progress=lambda text: None):
+    """Write an H.264 MP4 that fits Orca's video rules. Returns a list of what was reduced."""
+    if not find_ffmpeg():
+        raise WallpaperError(msg('ffmpeg_missing'))
+    reduced = []
+    start = max(0.0, edit.start_s)
+    with tempfile.TemporaryDirectory(prefix='wallpaper-video-') as work:
+        from_video = info.video
+        if from_video:
+            end = info.seconds if edit.end_s < 0 else min(edit.end_s, info.seconds or edit.end_s)
+            seconds = (end - start) if end > start else (info.seconds - start if info.seconds > start else VIDEO_MAX_SECONDS)
+            seconds = max(0.2, seconds)
+            limit = VIDEO_MAX_SECONDS * max(0.1, edit.speed)
+            if seconds > limit:
+                seconds = limit
+                reduced.append(msg('video_trimmed', s=VIDEO_MAX_SECONDS, max=VIDEO_MAX_SECONDS))
+            input_args = ['-ss', f'{start:.3f}', '-t', f'{seconds:.3f}', '-i', info.path]
+        else:  # an animated image: render its frames the way a still is rendered, then let ffmpeg time them
+            frames = source_frames(info.path, edit)
+            total = 0.0
+            names = []
+            durations = []
+            for index, (frame, ms) in enumerate(frames):
+                if total + ms / 1000 > VIDEO_MAX_SECONDS:
+                    reduced.append(msg('video_trimmed', s=VIDEO_MAX_SECONDS, max=VIDEO_MAX_SECONDS))
+                    break
+                name = f'f{index:04d}.jpg'
+                render_frame(frame, edit).save(os.path.join(work, name), 'JPEG', quality=95)
+                names.append(name)
+                durations.append(ms / 1000)
+                total += ms / 1000
+            with io.open(os.path.join(work, 'frames.txt'), 'w', encoding='utf8', newline='\n') as f:
+                for name, seconds in zip(names, durations):
+                    f.write(f"file '{name}'\nduration {seconds:.3f}\n")
+                f.write(f"file '{names[-1]}'\n")  # concat needs the last file repeated
+            input_args = ['-f', 'concat', '-safe', '0', '-i', os.path.join(work, 'frames.txt')]
+        for scale in (1.0, 0.8, 0.65):
+            w, h = round(edit.out_w * scale) // 2 * 2, round(edit.out_h * scale) // 2 * 2
+            while w * h > VIDEO_MAX_PIXELS:
+                w, h = int(w * 0.95) // 2 * 2, int(h * 0.95) // 2 * 2
+            if w < MIN_W or h < MIN_H:
+                break
+            for crf in (28, 32, 36, 40):
+                progress(msg('video_encoding', w=w, h=h, crf=crf))
+                tmp = os.path.join(work, 'out.mp4')
+                _run_ffmpeg([*input_args, '-vf', _ffmpeg_vf(edit, scale, w, h, from_video), '-an', '-c:v', 'libx264',
+                             '-preset', 'medium', '-crf', str(crf), '-profile:v', 'high', '-movflags', '+faststart', tmp])
+                if os.path.getsize(tmp) <= VIDEO_MAX_BYTES:
+                    shutil.move(tmp, out_path)
+                    if crf > 28:
+                        reduced.append(msg('reduced_quality', q=crf))
+                    if scale < 1:
+                        reduced.append(msg('reduced_size', w=w, h=h))
+                    return reduced
+    raise WallpaperError(msg('video_cannot_compress'))
+
+
+def still_from_video(video_path, out_path):
+    """Save the first frame of a video as a WebP of at most 2 MB (the theme's fallback picture)."""
+    with tempfile.TemporaryDirectory(prefix='wallpaper-still-') as work:
+        png = os.path.join(work, 'first.png')
+        _run_ffmpeg(['-i', video_path, '-frames:v', '1', png])
+        with Image.open(png) as im:
+            im = im.convert('RGB')
+            for quality in (90, 80, 70, 60, 50, 40):
+                im.save(out_path, 'WEBP', quality=quality, method=4)
+                if os.path.getsize(out_path) <= MODES['stock']['max_bytes']:
+                    return
+    raise WallpaperError(msg('cannot_compress', mb=MODES['stock']['max_bytes'] // 1048576))
+
+
+def check_video(path):
+    """None or the problem with a written MP4, judged by Orca's own limits."""
+    size = os.path.getsize(path)
+    if size > 8 * 1024 * 1024:
+        return msg('out_over', size=f'{size / 1048576:.2f}', mb=8)
+    w, h, _ = probe_video(path)
+    if w < MIN_W or h < MIN_H or w * h > VIDEO_MAX_PIXELS:
+        return msg('out_range', w=w, h=h, minw=MIN_W, minh=MIN_H, max=MAX_SIDE)
+    return None
+
+
 def check_output(path, mode_name):
     """Re-open the written file and check it against the mode's rules; returns None or the problem."""
     mode = MODES[mode_name]
@@ -422,7 +602,7 @@ def check_output(path, mode_name):
     return None
 
 
-def write_slot_themes(slot, edit, plugin_dir=None):
+def write_slot_themes(slot, edit, plugin_dir=None, video=False):
     plugin_dir = plugin_dir or themes_dir()
     prefix, stem = SLOTS[slot]
     file_stem = 'custom' if slot == 1 else f'custom-{slot}'
@@ -432,6 +612,8 @@ def write_slot_themes(slot, edit, plugin_dir=None):
             theme = json.load(f)
         theme['background'] = {'path': f'images/{stem}.webp', 'opacity': round(edit.opacity, 2),
                                'size': edit.size, 'position': edit.position}
+        if video:
+            theme['background']['videoPath'] = f'images/{stem}.mp4'
         with io.open(path, 'w', encoding='utf8') as f:
             f.write(json.dumps(theme, indent=2, ensure_ascii=False) + '\n')
 
@@ -446,9 +628,33 @@ def save_library(slot, info, edit):
             os.remove(os.path.join(folder, name))
     if os.path.abspath(info.path) != os.path.abspath(target):
         shutil.copyfile(info.path, target)
+    try:
+        save_preview(info, target, os.path.join(folder, 'preview.jpg'))
+    except Exception:  # the preview only helps reopening the slot; never fail an Apply over it
+        pass
     with io.open(os.path.join(folder, 'settings.json'), 'w', encoding='utf8') as f:
-        json.dump({'source': os.path.basename(target), 'original': info.path, 'edit': asdict(edit)}, f, indent=2, ensure_ascii=False)
+        json.dump({'source': os.path.basename(target), 'original': info.path, 'edit': asdict(edit),
+                   'width': info.width, 'height': info.height, 'seconds': round(info.seconds, 2),
+                   'video': info.video, 'animated': info.animated}, f, indent=2, ensure_ascii=False)
     return target
+
+
+PREVIEW_SIDE = 960
+
+
+def save_preview(info, source, out_path):
+    """A small JPEG of the source's first frame, so the panel can show the slot's picture again (and the crop
+    frame on it) without the original being sent to it."""
+    with tempfile.TemporaryDirectory(prefix='wallpaper-preview-') as work:
+        if info.video:
+            png = os.path.join(work, 'first.png')
+            _run_ffmpeg(['-i', source, '-frames:v', '1', png])
+            source = png
+        with Image.open(source) as im:
+            im.seek(0)
+            frame = im.convert('RGB')
+    frame.thumbnail((PREVIEW_SIDE, PREVIEW_SIDE), Image.LANCZOS)
+    frame.save(out_path, 'JPEG', quality=80)
 
 
 def load_library(slot):
@@ -471,22 +677,42 @@ def apply_to_slot(slot, info, edit, progress=lambda text: None, plugin_dir=None,
     plugin_dir = plugin_dir or themes_dir()
     _, stem = SLOTS[slot]
     out = os.path.join(plugin_dir, 'images', f'{stem}.webp')
+    video_out = os.path.join(plugin_dir, 'images', f'{stem}.mp4')
     tmp = out + '.tmp.webp'
+    video_tmp = video_out + '.tmp.mp4'
+    video = edit.mode == 'video'
+    if video and not info.animated:
+        raise WallpaperError(msg('video_needs_motion'))
     try:
-        reduced = encode(info, edit, tmp, progress)
-        problem = check_output(tmp, edit.mode)
-        if problem:
-            raise WallpaperError(msg('out_invalid', problem=problem))
+        if video:
+            reduced = encode_video(info, edit, video_tmp, progress)
+            problem = check_video(video_tmp)
+            if problem:
+                raise WallpaperError(msg('out_invalid', problem=problem))
+            still_from_video(video_tmp, tmp)
+            os.replace(video_tmp, video_out)
+        else:
+            reduced = encode(info, edit, tmp, progress)
+            problem = check_output(tmp, edit.mode)
+            if problem:
+                raise WallpaperError(msg('out_invalid', problem=problem))
+            if os.path.exists(video_out):
+                os.remove(video_out)  # a stale video would keep playing over the new picture
         os.replace(tmp, out)
     finally:
-        if os.path.exists(tmp):
-            os.remove(tmp)
-    write_slot_themes(slot, edit, plugin_dir)
+        for leftover in (tmp, video_tmp):
+            if os.path.exists(leftover):
+                os.remove(leftover)
+    write_slot_themes(slot, edit, plugin_dir, video=video)
     save_library(slot, info, edit)
     message = ''
     if reload:
         progress(msg('reloading'))
         message = reload_in_orca(plugin_dir)
+    if video:
+        w, h, seconds = probe_video(video_out)
+        summary = f'{w}×{h}, {msg("kind_video", s=round(seconds))}, {os.path.getsize(video_out) / 1048576:.2f} MB'
+        return summary, reduced, message
     with Image.open(out) as im:
         kind = msg('kind_animated', n=getattr(im, 'n_frames', 1)) if getattr(im, 'is_animated', False) else msg('kind_still')
         summary = f'{im.size[0]}×{im.size[1]}, {kind}, {os.path.getsize(out) / 1048576:.2f} MB'

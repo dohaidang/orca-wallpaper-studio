@@ -5,3 +5,6 @@ __pycache__/
 node_modules/
 .orca/
 debug.log
+
+# the user's own wallpaper videos
+images/*.mp4
