@@ -2,8 +2,8 @@
   "manifestVersion": 2,
   "id": "wallpaper-studio",
   "name": "Wallpaper Studio",
-  "version": "0.3.2",
-  "description": "Use your own picture as an Orca wallpaper: crop and adjust it, and Studio keeps a My Wallpaper theme up to date with it.",
+  "version": "0.4.0",
+  "description": "Use your own picture as an Orca wallpaper: crop and adjust it, and Studio keeps the My Wallpaper themes up to date with it.",
   "author": {
     "name": "dohaidang",
     "url": "https://github.com/dohaidang"
@@ -39,6 +39,60 @@
         "type": "string",
         "default": "",
         "placeholder": "Leave empty to find Python automatically"
+      }
+    ],
+    "themes": [
+      {
+        "id": "my-wallpaper",
+        "title": "My Wallpaper",
+        "path": "themes/custom.json"
+      },
+      {
+        "id": "my-wallpaper-sidebar-dark",
+        "title": "My Wallpaper (dark sidebar)",
+        "path": "themes/custom-sidebar-dark.json"
+      },
+      {
+        "id": "my-wallpaper-sidebar-light",
+        "title": "My Wallpaper (light sidebar)",
+        "path": "themes/custom-sidebar-light.json"
+      },
+      {
+        "id": "my-wallpaper-2",
+        "title": "My Wallpaper 2",
+        "path": "themes/custom-2.json"
+      },
+      {
+        "id": "my-wallpaper-2-sidebar-dark",
+        "title": "My Wallpaper 2 (dark sidebar)",
+        "path": "themes/custom-2-sidebar-dark.json"
+      },
+      {
+        "id": "my-wallpaper-2-sidebar-light",
+        "title": "My Wallpaper 2 (light sidebar)",
+        "path": "themes/custom-2-sidebar-light.json"
+      },
+      {
+        "id": "my-wallpaper-3",
+        "title": "My Wallpaper 3",
+        "path": "themes/custom-3.json"
+      },
+      {
+        "id": "my-wallpaper-3-sidebar-dark",
+        "title": "My Wallpaper 3 (dark sidebar)",
+        "path": "themes/custom-3-sidebar-dark.json"
+      },
+      {
+        "id": "my-wallpaper-3-sidebar-light",
+        "title": "My Wallpaper 3 (light sidebar)",
+        "path": "themes/custom-3-sidebar-light.json"
+      }
+    ],
+    "terminalThemes": [
+      {
+        "id": "my-wallpaper-term",
+        "title": "My Wallpaper",
+        "path": "terminal/custom.json"
       }
     ]
   },

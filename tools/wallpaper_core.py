@@ -7,6 +7,7 @@ result against Orca's rules, writing the slot's theme files and keeping a librar
 import io
 import json
 import os
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -95,11 +96,31 @@ def ensure_theme_plugin(folder):
     return folder
 
 
+# The plugin's own folder (tools/ sits directly inside it). When the plugin is loaded from a writable folder (a
+# development folder), the My Wallpaper themes it contributes live right here and Studio rewrites their pictures in
+# place. A plugin installed from a catalog or Git URL sits in a read-only folder named after its content hash, so there
+# Studio falls back to a folder of its own in the user's home.
+PLUGIN_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def own_folder_usable():
+    root = PLUGIN_ROOT
+    if re.fullmatch(r'[0-9a-f]{64}', os.path.basename(os.path.normpath(root))):
+        return False  # an installed copy
+    try:
+        with io.open(os.path.join(root, 'orca-plugin.json'), encoding='utf8') as f:
+            has_themes = bool(json.load(f).get('contributes', {}).get('themes'))
+    except (OSError, ValueError):
+        return False
+    return has_themes and os.access(root, os.W_OK)
+
+
 def themes_dir():
     """The My Wallpaper theme plugin folder, created on first use. The Orca plugin passes its "My Wallpaper themes
     folder" setting as WALLPAPER_THEMES_DIR (empty: the default folder in the user's home); the desktop tool
     reads the same variable. ASCII_THEMES_DIR is still read for people who point it at another theme plugin."""
-    folder = (os.environ.get('WALLPAPER_THEMES_DIR') or os.environ.get('ASCII_THEMES_DIR') or '').strip() or default_themes_dir()
+    folder = (os.environ.get('WALLPAPER_THEMES_DIR') or os.environ.get('ASCII_THEMES_DIR') or '').strip()
+    folder = folder or (PLUGIN_ROOT if own_folder_usable() else default_themes_dir())
     try:
         return ensure_theme_plugin(folder)
     except OSError as error:
@@ -124,6 +145,8 @@ def find_orca_cli():
 def reload_in_orca(folder):
     """Show the new wallpaper at once: reload the folder in Orca, loading it first if Orca has not seen it yet.
     Returns an empty string when Orca has the folder loaded, otherwise what went wrong."""
+    if os.environ.get('WALLPAPER_NO_RELOAD') or os.path.normcase(os.path.normpath(folder)) == os.path.normcase(os.path.normpath(PLUGIN_ROOT)):
+        return ''  # nothing to load: this is the plugin itself, which Orca reloads as its files change
     cli = find_orca_cli()
     if not cli:
         return msg('no_orca_cli')

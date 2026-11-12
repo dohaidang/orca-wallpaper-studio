@@ -5,7 +5,7 @@
 import type { OrcaWorkerApi } from 'orca/worker'
 import { spawn, spawnSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { readdirSync } from 'node:fs'
+import { mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { appendFile, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -44,7 +44,7 @@ function say(key: string, params: Record<string, string | number> = {}): string 
   return (language === 'vi' ? vietnamese : english).replace(/\{(\w+)\}/g, (_, name) => String(params[name] ?? ''))
 }
 
-type Upload = { dir: string; file: string; expected: number; received: number; next: number; touched: number }
+type Upload = { dir: string; file: string; expected: number; received: number; next: number; touched: number; busy?: boolean }
 const uploads = new Map<string, Upload>()
 
 // Why kept here and polled by the panel: a posted "done" can miss the panel (closed, reloaded), and the
@@ -54,7 +54,7 @@ type Job = {
   text: string
   result?: Record<string, unknown>
   finished?: number
-  child?: ReturnType<typeof spawn>
+  pid?: number
 }
 const jobs = new Map<string, Job>()
 const JOB_KEEP_MS = 10 * 60 * 1000
@@ -157,6 +157,61 @@ function runCli(
   })
 }
 
+function appData(): string {
+  return process.env.APPDATA ?? (process.env.USERPROFILE ? join(process.env.USERPROFILE, 'AppData', 'Roaming') : tmpdir())
+}
+// Jobs report through files here, outside the plugin folder (Orca restarts the worker when files inside it change).
+const JOBS_DIR = join(appData(), 'orca-wallpaper-studio', 'jobs')
+const JOB_FILE_KEEP_MS = 24 * 60 * 60 * 1000
+
+type JobFile = { state: 'running' | 'done'; pid?: number; text?: string; result?: Record<string, unknown> | null }
+
+function readJobFile(job: string): JobFile | null {
+  try {
+    return JSON.parse(readFileSync(join(JOBS_DIR, `${job}.json`), 'utf8')) as JobFile
+  } catch {
+    return null
+  }
+}
+
+function alive(pid: number | undefined): boolean {
+  if (!pid) return true // not known yet: the process has only just started
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
+
+function sweepJobFiles(): void {
+  try {
+    for (const name of readdirSync(JOBS_DIR)) {
+      const path = join(JOBS_DIR, name)
+      if (Date.now() - statSync(path).mtimeMs > JOB_FILE_KEEP_MS) unlinkSync(path)
+    }
+  } catch {
+    // no jobs folder yet
+  }
+}
+
+/** Starts the encode as a detached process with no pipes, so it survives a restart of this worker. */
+function startDetached(python: string[], args: string[], extraEnv: Record<string, string>): string | null {
+  const env: Record<string, string | undefined> = { ...process.env, ...extraEnv }
+  env.APPDATA ??= env.USERPROFILE ? join(env.USERPROFILE, 'AppData', 'Roaming') : undefined
+  env.LOCALAPPDATA ??= env.USERPROFILE ? join(env.USERPROFILE, 'AppData', 'Local') : undefined
+  delete env.ELECTRON_RUN_AS_NODE
+  try {
+    const child = spawn(python[0], [...python.slice(1), '-I', ...args], { detached: true, stdio: 'ignore', windowsHide: true, env })
+    child.on('error', () => undefined)
+    if (!child.pid) return 'no process'
+    child.unref()
+    return null
+  } catch (error) {
+    return (error as Error).message
+  }
+}
+
 async function dropUpload(id: string): Promise<void> {
   const upload = uploads.get(id)
   uploads.delete(id)
@@ -167,7 +222,7 @@ export default function activate(orca: OrcaWorkerApi): void {
   // Uploads abandoned mid-way (panel closed) are removed after a few idle minutes.
   const sweep = setInterval(() => {
     const now = Date.now()
-    for (const [id, upload] of uploads) if (now - upload.touched > UPLOAD_IDLE_MS) void dropUpload(id)
+    for (const [id, upload] of uploads) if (!upload.busy && now - upload.touched > UPLOAD_IDLE_MS) void dropUpload(id)
     for (const [id, job] of jobs) if (job.finished && now - job.finished > JOB_KEEP_MS) jobs.delete(id)
   }, 60 * 1000)
 
@@ -180,20 +235,43 @@ export default function activate(orca: OrcaWorkerApi): void {
 
   orca.panels.handle('wallpaper.cancel', async ({ job, lang }: { job: string; lang?: string }) => {
     setLanguage(lang)
-    const entry = jobs.get(String(job ?? ''))
-    if (!entry || entry.state === 'done') return { ok: false }
-    Object.assign(entry, { state: 'done', result: { ok: false, error: say('cancelled') }, finished: Date.now() })
-    entry.child?.kill()
+    const id = String(job ?? '')
+    const entry = jobs.get(id)
+    const file = readJobFile(id)
+    if ((entry && entry.state === 'done') || (!entry && (!file || file.state === 'done'))) return { ok: false }
+    const result = { ok: false, error: say('cancelled') }
+    if (entry) Object.assign(entry, { state: 'done', result, finished: Date.now() })
+    const pid = entry?.pid ?? file?.pid
+    if (pid) {
+      try {
+        process.kill(pid)
+      } catch {
+        // already gone
+      }
+    }
+    try {
+      writeFileSync(join(JOBS_DIR, `${id}.json`), JSON.stringify({ state: 'done', pid, text: '', result }), 'utf8')
+    } catch {
+      // the panel still gets the answer below
+    }
     orca.log('wallpaper.apply cancelled')
     return { ok: true }
   })
 
   orca.panels.handle('wallpaper.status', async ({ job }: { job: string }) => {
-    const entry = jobs.get(String(job ?? ''))
-    if (!entry) return { state: 'unknown' }
-    return { state: entry.state, text: entry.text, result: entry.result ?? null }
+    const id = String(job ?? '')
+    const entry = jobs.get(id)
+    if (entry) return { state: entry.state, text: entry.text, result: entry.result ?? null }
+    // A restarted worker has forgotten the job, but the process that runs it keeps its file up to date.
+    const file = readJobFile(id)
+    if (!file) return { state: 'unknown' }
+    if (file.state === 'running' && !alive(file.pid)) {
+      return { state: 'done', text: '', result: { ok: false, error: say('tool_stopped', { code: '', tail: '' }).trim() } }
+    }
+    return { state: file.state, text: file.text ?? '', result: file.result ?? null }
   })
   sweep.unref?.()
+  sweepJobFiles()
 
   orca.panels.handle('wallpaper.env', async () => {
     const { python, cli, env } = await tools(orca)
@@ -238,8 +316,10 @@ export default function activate(orca: OrcaWorkerApi): void {
     return { received: upload.received }
   })
 
-  // Answers at once with a job id; the slow encode runs in the background and reports through panel
-  // posts, because a request answer must arrive within 120 s at most.
+  // Answers at once with a job id. The slow encode runs in a detached Python process that reports through a job file,
+  // because Orca restarts this worker whenever a file in the plugin folder changes and Studio writes the new picture
+  // into that folder, so the worker cannot be relied on to stay alive until the encode is done. This worker watches
+  // the file and tells the panel; a restarted worker answers status requests from the same file.
   orca.panels.handle(
     'wallpaper.apply',
     async ({ id, slot, edit, lang }: { id: string; slot: number; edit: unknown; lang?: string }, context: { panel?: string } = {}) => {
@@ -261,42 +341,65 @@ export default function activate(orca: OrcaWorkerApi): void {
         }
       }
       orca.log(`wallpaper.apply slot ${slot}: started (${upload.received} bytes)`)
-      void (async () => {
-        try {
-          const { python, cli, env } = await tools(orca)
-          if (!python) return finish({ ok: false, error: say('no_python') })
-          const editFile = join(upload.dir, 'edit.json')
-          // The Python tool writes its own messages (progress, adjustments, errors) in the same language.
-          await writeFile(editFile, JSON.stringify({ ...(edit as Record<string, unknown> | null ?? {}), lang: language }), 'utf8')
-          let lastPost = 0
-          const answer = await runCli(python, [cli, 'apply', upload.file, String(slot), editFile], (text) => {
-            entry.text = text
-            const now = Date.now()
-            if (now - lastPost > 400) {
-              lastPost = now
+      const { python, cli, env } = await tools(orca)
+      if (!python) {
+        finish({ ok: false, error: say('no_python') })
+        await dropUpload(id)
+        return { job }
+      }
+      mkdirSync(JOBS_DIR, { recursive: true })
+      const jobFile = join(JOBS_DIR, `${job}.json`)
+      writeFileSync(jobFile, JSON.stringify({ state: 'running', text: entry.text, result: null }), 'utf8')
+      const editFile = join(upload.dir, 'edit.json')
+      // The Python tool writes its own messages (progress, adjustments, errors) in the same language.
+      await writeFile(editFile, JSON.stringify({ ...((edit as Record<string, unknown> | null) ?? {}), lang: language }), 'utf8')
+      upload.busy = true // the Python process removes this folder when it is done
+      const problem = startDetached(python, [cli, 'apply', upload.file, String(slot), editFile], {
+        ...env,
+        WALLPAPER_JOB_FILE: jobFile,
+        WALLPAPER_CLEANUP_DIR: upload.dir
+      })
+      if (problem) {
+        upload.busy = false
+        finish({ ok: false, error: say('python_missing', { python: python.join(' '), error: problem }) })
+        await dropUpload(id)
+        return { job }
+      }
+      let lastPost = 0
+      const watch = setInterval(() => {
+        const file = readJobFile(job)
+        if (!file) return
+        entry.pid = file.pid
+        if (file.state === 'running') {
+          if (file.pid && !alive(file.pid)) {
+            clearInterval(watch)
+            uploads.delete(id)
+            finish({ ok: false, error: say('tool_stopped', { code: '', tail: '' }).trim() })
+            return
+          }
+          if (file.text && file.text !== entry.text) {
+            entry.text = file.text
+            if (Date.now() - lastPost > 400) {
+              lastPost = Date.now()
               try {
-                orca.panels.post('wallpaper.progress', { job, text }, target)
+                orca.panels.post('wallpaper.progress', { job, text: file.text }, target)
               } catch {
                 // the panel polls wallpaper.status anyway
               }
             }
-          }, (child) => {
-            entry.child = child
-          }, env)
-          orca.log(`wallpaper.apply slot ${slot}: ${JSON.stringify(answer)}`)
-          finish(answer)
-        } catch (error) {
-          orca.log(`wallpaper.apply slot ${slot} failed: ${String((error as Error)?.stack ?? error)}`)
-          finish({ ok: false, error: String((error as Error)?.message ?? error) })
-        } finally {
-          await dropUpload(id)
+          }
+          return
         }
-      })()
+        clearInterval(watch)
+        uploads.delete(id)
+        orca.log(`wallpaper.apply slot ${slot}: ${JSON.stringify(file.result)}`)
+        finish(file.result ?? { ok: false, error: say('tool_stopped', { code: '', tail: '' }).trim() })
+      }, 300)
       return { job }
     }
   )
 }
 
 export function deactivate(): void {
-  for (const id of [...uploads.keys()]) void dropUpload(id)
+  for (const [id, upload] of [...uploads]) if (!upload.busy) void dropUpload(id)
 }

@@ -8,7 +8,7 @@ Use your own picture as an Orca wallpaper. Pick an image, crop and adjust it, an
 - A panel that follows Orca's language (Vietnamese or English).
 - A desktop tool (`tools/wallpaper_studio.py`) with the same editor in a small Tk window.
 
-It needs no other plugin. Wallpaper Studio makes and manages its own small theme plugin for the My Wallpaper themes.
+It is one plugin and needs no other: the **My Wallpaper** themes are part of Wallpaper Studio itself.
 
 ## Requirements
 
@@ -17,12 +17,12 @@ It needs no other plugin. Wallpaper Studio makes and manages its own small theme
 
 ## Install
 
-1. In Orca, open **Settings → Plugins → Install plugin → Git URL** and enter `https://github.com/dohaidang/orca-wallpaper-studio`. (From a clone you can use **Local folder** instead.)
+1. **Get the plugin into Orca.** The simplest way is **Settings → Plugins → Install plugin → Git URL** with `https://github.com/dohaidang/orca-wallpaper-studio`. To have everything in this single plugin, clone the repository and load the clone as a development folder instead (**Settings → Plugins → Development folders**, or `orca plugin dev load <clone folder>`); see the note below.
 2. Wallpaper Studio runs its own code in a separate process with your user account's access, so Orca asks you to approve it before it starts. Read what it lists and approve it if you trust it.
 3. Open the **Wallpaper Studio** panel from the right sidebar (the layers icon), choose an image, crop it and press **Apply to Orca**.
-4. Under **Settings → Appearance**, select the **My Wallpaper** theme (it appears in the theme list the first time you apply a picture). Set **Background Opacity** below 1 and turn **Reduce Visual Effects** off, so Orca paints the wallpaper behind the terminal.
+4. Under **Settings → Appearance**, select the **My Wallpaper** theme. Set **Background Opacity** below 1 and turn **Reduce Visual Effects** off, so Orca paints the wallpaper behind the terminal.
 
-The first time you press Apply, Studio creates the theme plugin in a folder named **Orca My Wallpaper** in your home folder and loads it into Orca for you; after that it only rewrites the picture and reloads. You can move it with the plugin's **My Wallpaper themes folder** setting. The theme plugin is loaded as a development folder, so Orca shows it as "Dev · unverified"; that is expected, because the pictures are yours.
+**One plugin, or one extra folder.** Orca reads a theme's wallpaper only from inside the plugin that contributes the theme, and a plugin installed from the catalog or a Git URL sits in a read-only folder. Loaded as a development folder, Studio writes your picture straight into its own folder and everything is one plugin. Installed from a Git URL, it cannot, so the first time you press Apply it creates a small theme plugin named **Orca My Wallpaper** in your home folder and loads it into Orca for you (Orca shows it as "Dev · unverified", because the pictures are yours); after that it only rewrites the picture. You can choose that folder with the plugin's **My Wallpaper themes folder** setting. In that case you will see two sets of My Wallpaper themes; use the one from the extra folder.
 
 Your original pictures and their crop settings are kept in `%APPDATA%\orca-wallpaper-studio\library` (set `WALLPAPER_STUDIO_LIBRARY` to move it), so a slot can be reopened later and updating the plugin never loses them.
 
@@ -30,7 +30,7 @@ Your original pictures and their crop settings are kept in `%APPDATA%\orca-wallp
 
 An Orca panel cannot write files, and one panel message carries at most 64 KiB. So the panel sends the chosen image to the plugin's worker in chunks, and the worker runs `tools/wallpaper_cli.py`. That uses Pillow to crop, adjust and encode the image as a WebP that Orca accepts, writes it into the My Wallpaper theme folder, updates the slot's theme files and reloads that folder in Orca.
 
-Orca reads a theme's background only from inside the theme's own plugin folder, and a plugin installed from a catalog or Git URL is read-only. That is why Studio keeps its My Wallpaper themes in a folder of its own, loaded as a development folder, instead of changing another plugin.
+Orca restarts a development plugin's worker (and may reload its panel) whenever a file in the plugin folder changes, and Studio changes files there when it saves your picture. So the encode does not depend on the worker: it runs as a separate process that reports its progress and result in a small job file under `%APPDATA%\orca-wallpaper-studio\jobs`, and the worker and panel read that file, including after a restart.
 
 Limits Orca puts on a theme background: 640×360 to 4096×4096, a still WebP, PNG or JPEG of at most 2 MB. Stock Orca refuses **animated** WebP backgrounds (it plays a looping video instead), so the panel has two modes under "Apply to": **Stock Orca** (the default: a still image of at most 2 MB, which any Orca accepts) and **Patched Orca** (animated allowed, up to 16 MB, only for an Orca you modified to accept it). The tool lowers quality or size until the result fits.
 

@@ -188,6 +188,61 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
 
 
+    def test_default_folder_is_the_plugin_itself_unless_it_is_an_installed_copy(self):
+        old_root, old_env = core.PLUGIN_ROOT, {k: os.environ.pop(k, None) for k in ('WALLPAPER_THEMES_DIR', 'ASCII_THEMES_DIR')}
+        try:
+            dev = os.path.join(self.tmp, 'dev-plugin')
+            os.makedirs(os.path.join(dev, 'tools'))
+            with open(os.path.join(dev, 'orca-plugin.json'), 'w', encoding='utf8') as f:
+                json.dump({'contributes': {'themes': [{'id': 'x'}]}}, f)
+            core.PLUGIN_ROOT = dev
+            self.assertTrue(core.own_folder_usable())
+            self.assertEqual(core.themes_dir(), dev)
+            installed = os.path.join(self.tmp, 'plugins', 'author.name', 'a' * 64)  # how Orca names an installed copy
+            os.makedirs(installed)
+            with open(os.path.join(installed, 'orca-plugin.json'), 'w', encoding='utf8') as f:
+                json.dump({'contributes': {'themes': [{'id': 'x'}]}}, f)
+            core.PLUGIN_ROOT = installed
+            self.assertFalse(core.own_folder_usable())
+            no_themes = os.path.join(self.tmp, 'no-themes')
+            os.makedirs(no_themes)
+            with open(os.path.join(no_themes, 'orca-plugin.json'), 'w', encoding='utf8') as f:
+                json.dump({'contributes': {}}, f)
+            core.PLUGIN_ROOT = no_themes
+            self.assertFalse(core.own_folder_usable())
+        finally:
+            core.PLUGIN_ROOT = old_root
+            for key, value in old_env.items():
+                if value is not None:
+                    os.environ[key] = value
+
+    def test_detached_run_reports_through_the_job_file_and_cleans_up(self):
+        upload = os.path.join(self.tmp, 'upload')
+        os.makedirs(upload)
+        shutil.copy(self.small, os.path.join(upload, 'source.png'))
+        edit = os.path.join(upload, 'edit.json')
+        with open(edit, 'w', encoding='utf8') as f:
+            json.dump({'lang': 'en', 'mode': 'stock', 'crop': [0, 0, 300, 200], 'out_w': 1280, 'out_h': 720}, f)
+        folder = os.path.join(self.tmp, 'themes-out')
+        core.ensure_theme_plugin(folder)
+        job = os.path.join(self.tmp, 'job.json')
+        env = dict(os.environ, WALLPAPER_JOB_FILE=job, WALLPAPER_CLEANUP_DIR=upload, WALLPAPER_THEMES_DIR=folder,
+                   WALLPAPER_STUDIO_LIBRARY=os.path.join(self.tmp, 'lib'), WALLPAPER_NO_RELOAD='1')
+        cli = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'wallpaper_cli.py')
+        done = subprocess.run([sys.executable, '-I', cli, 'apply', os.path.join(upload, 'source.png'), '1', edit],
+                              env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.assertEqual(done.returncode, 0)
+        with open(job, encoding='utf8') as f:
+            record = json.load(f)
+        self.assertEqual(record['state'], 'done')
+        self.assertTrue(record['result']['ok'], record)
+        self.assertEqual(record['result']['folder'], folder)
+        self.assertTrue(record['pid'] > 0)
+        self.assertFalse(os.path.exists(upload), 'the uploaded picture folder should be removed by the tool')
+        with Image.open(os.path.join(folder, 'images', 'custom.webp')) as written:
+            self.assertEqual(written.size, (1280, 720))
+
+
 class StudioSmokeTest(unittest.TestCase):
     """Builds the real window off-screen, opens an image, drags and zooms the crop, and renders previews."""
 

@@ -8,15 +8,48 @@
 """
 import json
 import os
+import shutil
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # isolated mode does not add it
 import wallpaper_core as core  # noqa: E402
 
 
+# Orca reloads a development plugin, and restarts its worker, whenever a file in the plugin folder changes. Studio
+# writes the new picture into that folder, so the worker that started this process may be restarted before it
+# finishes, and the worker's pipes to this process would break. So the worker starts it detached, with no pipes, and
+# this process reports progress and the final answer in the job file instead (a file outside the plugin folder).
+JOB_FILE = os.environ.get('WALLPAPER_JOB_FILE', '')
+
+
+def write_job(state, text='', result=None):
+    if not JOB_FILE:
+        return
+    tmp = JOB_FILE + '.tmp'
+    try:
+        with open(tmp, 'w', encoding='utf8') as f:
+            json.dump({'state': state, 'pid': os.getpid(), 'text': text, 'result': result}, f, ensure_ascii=False)
+        os.replace(tmp, JOB_FILE)
+    except OSError:
+        pass
+
+
+def say_progress(text):
+    write_job('running', text)
+    try:
+        print('PROGRESS ' + text, file=sys.stderr, flush=True)
+    except (OSError, ValueError):
+        pass  # the pipe is gone (or there never was one); the job file has it
+
+
 def emit(data):
-    sys.stdout.write(json.dumps(data, ensure_ascii=False) + '\n')
-    sys.stdout.flush()
+    if JOB_FILE:
+        write_job('done', result=data)
+    try:
+        sys.stdout.write(json.dumps(data, ensure_ascii=False) + '\n')
+        sys.stdout.flush()
+    except (OSError, ValueError):
+        pass
 
 
 def apply(source, slot, edit_path):
@@ -39,14 +72,18 @@ def apply(source, slot, edit_path):
     edit.out_w, edit.out_h = core.clamp_output(max(1, int(edit.out_w)), max(1, int(edit.out_h)))
     folder = core.themes_dir()
     summary, reduced, reload = core.apply_to_slot(
-        slot, info, edit, plugin_dir=folder, progress=lambda text: print('PROGRESS ' + text, file=sys.stderr, flush=True))
+        slot, info, edit, plugin_dir=folder, progress=say_progress)
     emit({'ok': True, 'summary': summary, 'reduced': reduced, 'reload': reload, 'reloaded': reload == '', 'folder': folder})
 
 
 def main():
-    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
-    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding='utf-8', errors='replace')
+        except (AttributeError, OSError, ValueError):
+            pass
     args = sys.argv[1:]
+    write_job('running', '')
     try:
         if args[:1] == ['env']:
             emit({'terminalOpacity': core.terminal_opacity()})
@@ -58,6 +95,10 @@ def main():
         emit({'ok': False, 'error': str(error)})
     except Exception as error:  # report, never fail silently
         emit({'ok': False, 'error': f'{type(error).__name__}: {error}'})
+    finally:
+        cleanup = os.environ.get('WALLPAPER_CLEANUP_DIR', '')
+        if cleanup:  # the worker's temp folder with the uploaded picture; a restarted worker cannot remove it
+            shutil.rmtree(cleanup, ignore_errors=True)
 
 
 if __name__ == '__main__':
