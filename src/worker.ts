@@ -270,6 +270,26 @@ export default function activate(orca: OrcaWorkerApi): void {
     }
     return { state: file.state, text: file.text ?? '', result: file.result ?? null }
   })
+  // When Orca reloads the panel (it does that when Studio saves the picture into the plugin folder), the panel asks
+  // for the newest job: one still running, or one that finished a moment ago and whose result it may have missed.
+  orca.panels.handle('wallpaper.recent', async () => {
+    try {
+      const newest = readdirSync(JOBS_DIR)
+        .filter((name) => name.endsWith('.json'))
+        .map((name) => ({ name, mtime: statSync(join(JOBS_DIR, name)).mtimeMs }))
+        .sort((a, b) => b.mtime - a.mtime)[0]
+      if (!newest) return { job: null }
+      const job = newest.name.slice(0, -'.json'.length)
+      const file = readJobFile(job)
+      if (!file) return { job: null }
+      const age = Date.now() - newest.mtime
+      if (file.state === 'running' && !alive(file.pid)) return { job: null }
+      if (file.state === 'done' && age > 60 * 1000) return { job: null }
+      return { job, state: file.state, text: file.text ?? '', result: file.result ?? null, ageMs: age }
+    } catch {
+      return { job: null }
+    }
+  })
   sweep.unref?.()
   sweepJobFiles()
 

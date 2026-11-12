@@ -314,7 +314,6 @@ $('apply').addEventListener('click', async () => {
     const { job } = await orca.plugin.request('wallpaper.apply', { id, slot, edit: currentEdit(), lang: language })
     state.uploadId = null
     state.job = job
-    rememberJob(job, slot)
     if (state.cancelled) return void orca.plugin.request('wallpaper.cancel', { job, lang: language }).catch(() => {})
     void pollJob(job, slot)
   } catch (error) {
@@ -364,7 +363,6 @@ function showResult(job, slot, answer) {
 }
 
 function finish(ok, text) {
-  forgetJob()
   state.busy = false
   state.job = null
   state.uploadId = null
@@ -392,29 +390,23 @@ orca.plugin.request('wallpaper.env').then(({ terminalOpacity }) => {
 }).catch(() => {})
 
 // ---------- resuming a job ----------
-// Studio writes the new picture into the plugin's own folder, and Orca reloads a development plugin (and may reload
-// its panel) when a file in that folder changes. So the job in progress is remembered here and picked up again,
-// from the job file the worker reads, when the panel comes back.
-const JOB_KEY = 'wallpaper-studio.job'
-function rememberJob(job, slot) {
-  try { localStorage.setItem(JOB_KEY, JSON.stringify({ job, slot, at: Date.now() })) } catch { /* storage unavailable */ }
-}
-function forgetJob() {
-  try { localStorage.removeItem(JOB_KEY) } catch { /* storage unavailable */ }
-}
+// Studio writes the new picture into the plugin's own folder, and Orca reloads a development plugin (and its panel)
+// when a file in that folder changes. A reloaded panel has lost everything it knew, so it asks the worker for the
+// newest job (the worker reads it from the job file): still running, or finished a moment ago.
 function resumeJob() {
-  let saved = null
-  try { saved = JSON.parse(localStorage.getItem(JOB_KEY) || 'null') } catch { /* nothing saved */ }
-  if (!saved || Date.now() - saved.at > 15 * 60 * 1000) return forgetJob()
-  state.busy = true
-  state.job = saved.job
-  $('editor-box').hidden = false
-  $('apply').disabled = true
-  $('cancel').hidden = false
-  $('cancel').disabled = false
-  setProgress(0.5)
-  setStatus(tr('processing'))
-  void pollJob(saved.job, saved.slot)
+  orca.plugin.request('wallpaper.recent', {}).then((recent) => {
+    if (!recent || !recent.job || state.busy) return
+    state.job = recent.job
+    $('editor-box').hidden = false
+    if (recent.state === 'done') return showResult(recent.job, recent.result?.slot || 1, recent.result || {})
+    state.busy = true
+    $('apply').disabled = true
+    $('cancel').hidden = false
+    $('cancel').disabled = false
+    setProgress(0.5)
+    setStatus(recent.text || tr('processing'))
+    void pollJob(recent.job, 1)
+  }).catch(() => {})
 }
 
 // ---------- language ----------

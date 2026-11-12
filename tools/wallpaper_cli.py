@@ -73,7 +73,7 @@ def apply(source, slot, edit_path):
     folder = core.themes_dir()
     summary, reduced, reload = core.apply_to_slot(
         slot, info, edit, plugin_dir=folder, progress=say_progress)
-    emit({'ok': True, 'summary': summary, 'reduced': reduced, 'reload': reload, 'reloaded': reload == '', 'folder': folder})
+    emit({'ok': True, 'summary': summary, 'reduced': reduced, 'reload': reload, 'reloaded': reload == '', 'folder': folder, 'slot': slot})
 
 
 def main():
