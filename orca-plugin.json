@@ -2,7 +2,7 @@
   "manifestVersion": 2,
   "id": "wallpaper-studio",
   "name": "Wallpaper Studio",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Use your own pictures and videos as Orca wallpapers: crop, trim and adjust them, and Studio keeps the My Wallpaper themes up to date with them.",
   "icon": "assets/avatar.png",
   "cover": {

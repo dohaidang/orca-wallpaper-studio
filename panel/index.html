@@ -43,22 +43,6 @@
       </div>
 
       <details open>
-        <summary data-i18n="legend_apply"></summary>
-        <div class="body">
-          <div class="segmented" role="radiogroup">
-            <label><input type="radio" name="slot" value="1" checked><span>1</span></label>
-            <label><input type="radio" name="slot" value="2"><span>2</span></label>
-            <label><input type="radio" name="slot" value="3"><span>3</span></label>
-          </div>
-          <div class="choices">
-            <label><input type="radio" name="mode" value="stock" checked> <span data-i18n="mode_stock"></span></label>
-            <label><input type="radio" name="mode" value="video"> <span data-i18n="mode_video"></span></label>
-            <label><input type="radio" name="mode" value="patched"> <span data-i18n="mode_patched"></span></label>
-          </div>
-        </div>
-      </details>
-
-      <details open>
         <summary data-i18n="legend_crop"></summary>
         <div class="body">
           <select id="aspect" data-i18n-aria="aspect_aria"></select>
@@ -108,6 +92,22 @@
             <label class="inline"><span data-i18n="from_frame"></span> <input id="first" type="number" min="0" value="0"></label>
             <label class="inline"><span data-i18n="to_frame"></span> <input id="last" type="number" min="-1" value="-1" data-i18n-title="to_frame_title"></label>
             <label class="inline"><span data-i18n="every"></span> <input id="step" type="number" min="1" max="4" value="1"> <span data-i18n="keep_one"></span></label>
+          </div>
+        </div>
+      </details>
+
+      <details open>
+        <summary data-i18n="legend_apply"></summary>
+        <div class="body">
+          <div class="segmented" role="radiogroup">
+            <label><input type="radio" name="slot" value="1" checked><span>1</span></label>
+            <label><input type="radio" name="slot" value="2"><span>2</span></label>
+            <label><input type="radio" name="slot" value="3"><span>3</span></label>
+          </div>
+          <div class="choices">
+            <label><input type="radio" name="mode" value="stock" checked> <span data-i18n="mode_stock"></span></label>
+            <label><input type="radio" name="mode" value="video"> <span data-i18n="mode_video"></span></label>
+            <label><input type="radio" name="mode" value="patched"> <span data-i18n="mode_patched"></span></label>
           </div>
         </div>
       </details>
