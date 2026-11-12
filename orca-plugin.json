@@ -2,7 +2,7 @@
   "manifestVersion": 2,
   "id": "wallpaper-studio",
   "name": "Wallpaper Studio",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Use your own picture as an Orca wallpaper: crop and adjust it, and Studio keeps a My Wallpaper theme up to date with it.",
   "author": {
     "name": "dohaidang",

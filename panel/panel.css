@@ -29,6 +29,9 @@ button:focus-visible, .button:focus-visible, select:focus-visible, input:focus-v
 .primary { background: var(--primary); color: var(--primary-fg); border-color: var(--primary); font-weight: 600; }
 .wide { width: 100%; padding: 7px; }
 button:disabled { opacity: .5; cursor: default; }
+/* Without this, the display rules above (such as button's inline-block) override the hidden attribute and the
+   Cancel button never hides. */
+[hidden] { display: none !important; }
 canvas { display: block; width: 100%; border-radius: 6px; background: #0b0b0c; }
 #editor { cursor: grab; touch-action: none; }
 #editor.dragging { cursor: grabbing; }
