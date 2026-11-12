@@ -25,6 +25,21 @@ Use your own picture or video as the wallpaper of Orca. Open a file, crop and ad
 1. **Get the plugin into Orca.** The simplest way is **Settings → Plugins → Install plugin → Git URL** with `https://github.com/dohaidang/orca-wallpaper-studio`. To keep everything in this single plugin, clone the repository and load the clone as a development folder instead (**Settings → Plugins → Development folders**, or `orca plugin dev load <clone folder>`); see the note below.
 2. Wallpaper Studio runs its own code in a separate process with your user account's access, so Orca asks you to approve it before it starts. Read what it lists and approve it if you trust it.
 3. Open the **Wallpaper Studio** panel from the right sidebar (the layers icon).
+4. Check the **Quick Setup Note** below once. Without it Orca hides the wallpaper, even though Apply succeeded.
+
+> [!IMPORTANT]
+> **Quick Setup Note.** A wallpaper only shows, and a video only plays, when these Orca and Windows settings allow it. They are Orca's own settings, not the plugin's, so you set them once:
+>
+> | Setting | Value | Where |
+> | --- | --- | --- |
+> | **Background Opacity** | below **1** (try `0.6`) | Settings → Appearance → Interface → Advanced, and Terminal → Advanced |
+> | **Reduce Visual Effects** | **off** | Settings → Appearance |
+> | **Transparency effects** (Windows) | **on** | Windows Settings → Personalization → Colors |
+> | **Theme** | the **My Wallpaper** theme of the slot you applied | Settings → Appearance |
+>
+> With Background Opacity at 1 the terminal covers the picture completely. A video also needs Orca 1.4.254 or newer and plays while the Orca window has focus.
+>
+> The **Wallpaper strength** slider in the panel is a different setting: it is saved in the theme itself (how strong the picture is), while Background Opacity above is Orca's own.
 
 ## Use it
 
@@ -36,7 +51,7 @@ Use your own picture or video as the wallpaper of Orca. Open a file, crop and ad
    - **Video**: an MP4 wallpaper (Orca 1.4.254+). A video file always uses this mode.
    - **Patched Orca**: animated WebP up to 16 MB, only for an Orca you modified to accept it.
 5. Press **Apply to Orca**. The result stays in the panel, and the panel reopens with the same picture and settings.
-6. Under **Settings → Appearance**, select the **My Wallpaper** theme for that slot. Set **Background Opacity** below 1 and turn **Reduce Visual Effects** off, so Orca paints the wallpaper behind the terminal. A video plays only under those conditions, and while the Orca window has focus.
+6. Under **Settings → Appearance**, select the **My Wallpaper** theme for that slot. Make sure the settings in the **Quick Setup Note** above are in place, so Orca paints the wallpaper behind the terminal.
 
 **One plugin, or one extra folder.** Orca reads a theme's wallpaper only from inside the plugin that contributes the theme, and a plugin installed from the catalog or a Git URL sits in a read-only folder. Loaded as a development folder, Studio writes your picture straight into its own folder. Installed from a Git URL, it cannot, so the first time you press Apply it creates a small theme plugin named **Orca My Wallpaper** in your home folder and loads it into Orca for you (Orca shows it as "Dev · unverified", because the pictures are yours); after that it only rewrites the picture. Choose that folder with the **My Wallpaper themes folder** setting. In that case you will see two sets of My Wallpaper themes; use the one from the extra folder.
 
